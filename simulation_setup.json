@@ -1,0 +1,160 @@
+{
+"catalyst parameters":{
+	"catalyst particle shape (sphere / cylinder)": "sphere",
+	"sphere particle diameter [m]": 1.5e-3,
+	"cylinder particle (height, diameter) [m,m]": [1,1],
+	"BET surface area [m2 kg-1]": 102000,
+	"catalyst composition: molar percentage of CuO and ZnO; Al2O3 to balance [-]": [0.4, 0.4], 
+	
+	"known catalyst density (density / bulk density / both)" : "density",
+	"catalyst density [kg m-3]": 1300,
+	"catalyst bulk density [kg m-3]" : 1000 
+},
+
+
+
+
+
+"reactor parameters":{
+	"total number of tubes in the reactor [-]" : 1,
+	"single tube length [m]": 1.2,
+	"single tube diameter [m]": 0.04
+},
+
+
+
+
+
+"numerical parameters":{
+	"number of axial cells [-]": 120,
+	"number of radial cells [-]": 20,
+	
+	"advection discretization scheme (upwind_1o / upwind_2o)" : "upwind_2o",
+	"diffusion discretization scheme (central_2o / central_4o)" : "central_4o",
+	
+	"CFL number [-]": 0.9,
+	"conversion model partial pressure low limit [Pa]": 2,
+	"specie concentration low limit [mol m-3]": 1e-100
+},
+
+
+
+
+
+
+"field parameters":{
+	"feed steam to carbon ratio [-]": 1.5,
+
+	"reactor pressure [bar]": 15,
+	"position of given reactor pressure (inlet / outlet)": "outlet",
+
+	"inlet gas temperature [C]": 250,
+	"initial reactor temperature [C]": 284,
+	"reactor wall temperature profile [C]": [316, 316],
+	"wall temperature relative axial positions [-]": [0, 1],
+	
+	"flow rate given with (WF / WHSV)" : "WF",
+	"W_cat/F_CH3OH - catalyst weight per CH3OH molar feed rate [kg s mol-1]": 250,
+	"WHSV - hourly CH3OH molar feed rate per catalyst weight [mol h-1 kg-1]": 30
+},
+
+
+
+
+
+
+"simulation parameters":{
+	"continue simulation from file (yes / no)": "no",
+	"continuation dir. in results dir.": "d40_up_15bar_step",
+	"simulation type (steady / dynamic)": "dynamic",
+	
+	"steady simulation parameters":{
+		"maximum iterations": 1000000,
+		"convergence criteria": 1e-7,
+		"underrelaxation factor": 5e-4
+	},
+	
+	"dynamic simulation parameters":{
+		"run a steady simulation first (yes / no)": "yes",
+		"continue to dynamic simulation if convergence is not achieved (yes / no)": "yes",
+		"simulated time duration [s]": 100,
+		"timestep size [s]": 5e-4,
+		"dynamic boundary conditions (yes / no)": "yes"
+	}
+},
+
+
+
+
+
+
+
+"save file parameters":{
+	"show results only in terminal (yes / no)" : "yes",
+	
+	"new results directory name": "d40_up_15bar_step",
+	"save simulation output .json files (yes / no)": "yes",
+	"save log (yes / no)": "no",
+	
+	"steady simulation":{
+	"save .json every x iterations": 2500,
+	"write in terminal every x iterations": 500,
+	"keep last x .json files (int / all)": 1
+	},
+	
+	"dynamic simulation":{
+	"save .json every": 0.5,
+	"frequency saving unit (seconds / timesteps)": "seconds",
+	"write in terminal every x timesteps": 100
+	},
+	
+	"timestamp in directory name (yes / no)": "no",
+	"save input files  (yes / no)": "yes"
+},
+
+
+
+
+
+
+
+"dynamic boundary conditions": {
+	"use dynamic wall temperature profile (yes / no)": "yes",
+	"reactor wall temperature profile z relative positions": [0, 1],
+	"reactor wall temperature profile in time (t[s], T_profile[C])":[
+		[0, 	[316, 	316] ],
+		[5, 	[316, 	316] ],
+		[5, 	[340, 	340] ]
+		],
+
+	"use dynamic inlet temperature (yes / no)": "no",
+	"inlet gas temperature in time (t[s], T_in[C])":[
+		[0, 	250],
+		[5, 	245],
+		[10, 	250],
+		[15, 	245],
+		[20, 	250],
+		[25, 	250],
+		[30, 	245],
+		[35, 	245],
+		[40, 	250],
+		[45, 	245]
+	],
+
+	"use dynamic inlet mass flow (yes / no)": "yes",
+	"inlet mass flow in time (t[s], W_cat/F_CH3OH[kg s mol-1])":[
+		[0, 	250],
+		[5, 	250],
+		[5, 	170]
+	],
+
+	"use dynamic pressure (yes / no)": "no",
+	"pressure in time (t[s], p[bar])":[
+		[0, 	2],
+		[10, 	2],
+		[40, 	4]
+	]
+
+}
+
+}
