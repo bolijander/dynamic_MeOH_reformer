@@ -9,6 +9,7 @@ import math
 from scipy.interpolate import RectBivariateSpline 
 
 import copy
+import sys
 
 ''' 
 ==============================================================================================================================
@@ -51,6 +52,32 @@ class Specie(object):
         self.Cpd = Cpd
         self.Cpe = Cpe
         
+        # --- Given and calculated values needed for gas_mixture_viscosity function
+        # Parameters for calculation of gas viscosities
+        self.A = 1.16145
+        self.B = 0.14874
+        self.C = 0.52487
+        self.D = 0.77320
+        self.E = 2.16178
+        self.F = 2.43787
+        
+        # Special correction for highly polar substances such as alcohols and acids
+        self.kappa = 0.0682 + 4.704*(self.OH_groups / self.mol_mass)
+        # Dimensionless dipole moment
+        self.mu_r = 131.3 * ( self.mu / (self.Vc * self.Tc)**(1/2) ) 
+        
+        self.Fc = 1 - 0.275*w + 0.059035*(self.mu_r**4) + self.kappa
+        
+    # First, calculate the first order solution for local the pure gas viscosities (mu_i)
+    # mu_i is calculated according to:
+    # The Properties of Gases and Liquids - Book by Bruce E. Poling, John Paul O'Connell, and John Prausnitz
+    # p. 9.7 - method of Chung et.al.    
+    def mu_i(self, T): 
+        T_star = 1.2593 * (T / self.Tc)
+        Omega_v = self.A*(T_star**(-self.B)) + self.C*np.exp(-self.D*T_star) + self.E*np.exp(-self.F*T_star)
+        self.result = 40.758*( self.Fc*((self.mol_mass * T)**(1/2)) / (self.Vc**(2/3) * Omega_v)) 
+        return self.result
+        
 # Define specie instances
 CH3OH = Specie('CH3OH', 118.0, 512.64, 0.557970015, 1.7, 1, 32.042, \
                # Lambda_i values
@@ -83,7 +110,6 @@ CO = Specie('CO', 93.10, 132.85, 0.053424305, 0.122, 0, 28.01,\
                 25.56759, 6.096130, 4.054656, -2.671301, 0.131021) 
 
     
-
 def ergun_pressure(p, z, u_s, rho_fluid, d_particle, epsilon, mu_mix, reactor_l, reference_p = 'inlet'):
     """
     Calculate PRESSURE FIELD IN A PBR according to the SEMI-EMPIRICAL ERGUN EQUATION.
@@ -215,38 +241,20 @@ def gas_mixture_viscosity(X_i, T_C):
     # Convert temperature in Celsius to Kelvin
     T = T_C + 273.15 
     
-    # Parameters for calculation of gas viscosities
-    A = 1.16145
-    B = 0.14874
-    C = 0.52487
-    D = 0.77320
-    E = 2.16178
-    F = 2.43787
     
     # First, calculate the first order solution for local the pure gas viscosities (mu_i)
     # mu_i is calculated according to:
     # The Properties of Gases and Liquids - Book by Bruce E. Poling, John Paul O'Connell, and John Prausnitz
     # p. 9.7 - method of Chung et.al.
-
-    mu_i = np.zeros(5) # empty array of local pure gas viscosities
+    mu_i =[] # empty list of local pure gas viscosities
     
     for i in range(5):
-        if X_i[i] != 0: # Calculate only if there is some molecular fraction of this substance in a cell
-                
-            T_star = 1.2593 * (T / Specie._reg[i].Tc)
-            
-            Omega_v = A*(T_star**(-B)) + C*math.exp(-D*T_star) + E*math.exp(-F*T_star)
-            
-            # Dimensionless dipole moment
-            mu_r = 131.3 * ( Specie._reg[i].mu / (Specie._reg[i].Vc * Specie._reg[i].Tc)**(1/2) ) 
-            
-            # Special correction for highly polar substances such as alcohols and acids
-            kappa = 0.0682 + 4.704*(Specie._reg[i].OH_groups / Specie._reg[i].mol_mass)
-            
-            Fc = 1 - 0.275*Specie._reg[i].w + 0.059035*(mu_r**4) + kappa
-            
-            mu_i[i] = 40.758*( Fc*((Specie._reg[i].mol_mass * T)**(1/2)) / (Specie._reg[i].Vc**(2/3) * Omega_v)) 
-
+        # if X_i[i] != 0: # Calculate only if there is some molecular fraction of this substance in a cell
+            mu_i.append( Specie._reg[i].mu_i(T) ) # Calculation of each pure gas viscosity is done within the class Specie
+    
+    # Convert list to np array
+    mu_i = np.array(mu_i)
+    
     # Resulting viscosies are in microPoise, convert to Pascal second
     mu_i = mu_i * 1e-7
     # This array will be the numerator in caluclating mixture viscosity
@@ -254,30 +262,32 @@ def gas_mixture_viscosity(X_i, T_C):
     # Then, calculate the viscosity of gas mixture, according to:
     # A Viscosity Equation for Gas Mixtures, C.R. Wilke (1950) https://doi.org/10.1063/1.1747673
     
-    
     # Make empty arrays of denominators
-    denoms = np.ones(5) # array of denominators - i start with np.ones so i can skip the +1 from the formula
+    denoms = [] # array of denominators - i start with np.ones so i can skip the +1 from the formula
     
     # Calculate arrays of numerators and denominators
     for i in range(5): # i loop - numerator
-        if X_i[i] != 0: # skip calculation if there is 0 in the numerator
-            for j in range(5): # j loop - denominator
-                if i != j: # only when i and j are not equal - different species
-                    if X_i[j] != 0: # Proceed only if there is some molar fraction 
+        j_list = list(range(5))
+        j_list.remove(i) # Make list for j loop and remove overlapping element
+        phi_temp_sum = 0 # Temporary sum
+        for j in j_list: # j loop - denominator
+                # if X_i[j] != 0: # Proceed only if there is some molar fraction 
                         
-                        # numerator of phi
-                        k1 = ( 1 + (mu_i[i] / mu_i[j])**(1/2) * (Specie._reg[j].mol_mass / Specie._reg[i].mol_mass)**(1/4) )**2
-                        # denominator of phi
-                        k2 = math.sqrt(8) * (1 + (Specie._reg[i].mol_mass / Specie._reg[j].mol_mass))**(1/2)
-                            
-                        # phi
-                        phi_ij = k1 / k2
-                        
-                        # sum of phi 
-                        denoms[i] += phi_ij * X_i[j] / X_i[i]
+                # numerator of phi
+                k1 = ( 1 + (mu_i[i] / mu_i[j])**(1/2) * (Specie._reg[j].mol_mass / Specie._reg[i].mol_mass)**(1/4) )**2
+                # denominator of phi
+                k2 = math.sqrt(8) * (1 + (Specie._reg[i].mol_mass / Specie._reg[j].mol_mass))**(1/2)
+                    
+                # phi
+                phi_ij = k1 / k2
+                
+                # sum of phi 
+                # phi_temp_sum += phi_ij * X_i[j] / X_i[i]
+                phi_temp_sum += phi_ij * np.divide( X_i[j], X_i[i], out=np.zeros_like(X_i[j]), where=X_i[i]!=0)
+        denoms.append(phi_temp_sum) # Append 
+    denoms = np.array(denoms) # Convert to array in the end of loop
 
-    mu_f = sum(mu_i/denoms) # divide and sum up - zeros in numerator cancel out ones in denominator
-    
+    mu_f = sum( np.divide( mu_i, denoms, out=np.zeros_like(mu_i), where=denoms!=0)) # divide and sum up - zeros in numerator cancel out ones in denominator
     return mu_f
 
 
@@ -346,7 +356,7 @@ def specie_mass(V, C_i):
 
     Parameters
     ----------
-    V :             
+    V :            
         [m3] Gas volume
     C_i : array     
         [mol m-3] Molar concentration of component i
@@ -357,7 +367,6 @@ def specie_mass(V, C_i):
         [kg] Mass of specie i
 
     """
-    
     # Create an empty array of m_i values
     m_i = np.zeros(5)
     for i in range(5):
@@ -375,18 +384,18 @@ def density_mixture(C_i, V, P, T_C):
 
     Parameters
     ----------
-    C_i : array     
+    C_i : 1D array     
         [mol m-3] Molar concentration of component i
-    V :             
+    V : int
         [m3] Volume (of computational cell)
-    P :             
+    P : float       
         [Pa] Pressure
-    T_C :             
+    T_C : float      
         [C] Temperature
 
     Returns
     -------
-    rho_mix : 
+    rho_mix : 2D array
         [kg m-3] Density of ideal gas mixture
     """
     
@@ -772,7 +781,7 @@ def radial_diffusion_coefficient(field_v, d_particle, d_ti):
 
     Returns
     -------
-    D_er :          
+    D_er : 2D array         
         [m2 s-1] Effective radial diffusion coefficient 
 
     """
@@ -817,29 +826,31 @@ def radial_thermal_conductivity(u_s, rho_mix, Cp_mix, d_p, X_i, T_C, epsilon, N,
 
     Parameters
     ----------
-    u_s :               
+    u_s : 1D array              
         [m s-] Superficial flow velocity
-    rho_mix :           
+    rho_mix : 2D array         
         [mol m-3] Gas mixture density
-    Cp_mix :            
+    Cp_mix : 2D array         
         [J mol-1 K-1] Specific heat capacity of fluid mixture
-    d_p :               
+    d_p : float          
         [m] (effective )diameter of catalyst particle
-    X_i : array         
+    X_i : 3D         
         [-] Molar fraction of components
-    T_C :                 
+    T_C : 2D array            
         [C] Temperature
-    epsilon :           
+    epsilon : float      
         [-] Packed bed porosity
-    N :                 
+    N : float            
         [-] Reactor aspect ratio
     shape : string      
         [-] catalyst particle shape (cylinder / sphere)
 
     Returns
     -------
-    Lambda_er :         
+    Lambda_er : 2D array     
         [W m-1 K-1] Effective radial thermal conductivity
+    h_t : 1D array
+        [W m-2 K-1] Heat transfer coefficient of the tube-side film
     
     """
     
@@ -868,30 +879,26 @@ def radial_thermal_conductivity(u_s, rho_mix, Cp_mix, d_p, X_i, T_C, epsilon, N,
     
     # Calculate arrays of denominators
     for i in range(5): # i loop - numerator
-        for j in range(5): # j loop - denominator
-            if i != j: # only when i and j are not equal - different species
-                phi_ij = (Specie._reg[j].mol_mass / Specie._reg[i].mol_mass)**(1/2) 
-                    
-                # sum of phi 
-                Lambda_f_denoms[i] += phi_ij * np.divide(X_i[j], X_i[i], out=np.zeros_like(X_i[j]), where=X_i[i]!=0) # This np divide with special treatment is here to avoid division by zero in matrices
+        j_list = list(range(5))
+        j_list.remove(i) # Make list for j loop and remove overlapping element
+        for j in j_list: # j loop - denominator
+            phi_ij = (Specie._reg[j].mol_mass / Specie._reg[i].mol_mass)**(1/2) 
+                
+            # sum of phi 
+            Lambda_f_denoms[i] += phi_ij * np.divide(X_i[j], X_i[i], out=np.zeros_like(X_i[j]), where=X_i[i]!=0) # This np divide with special treatment is here to avoid division by zero in matrices
 
     # divide and sum up - zeros in numerator cancel out ones in denominator
     Lambda_f = sum(Lambda_i/Lambda_f_denoms) # [W m-1 K-1]
     
+    
     # Ratio of thermal conductivity of solid cat. particle and gas fluid
     kappa = Lambda_p / Lambda_f # [-]
     
-    # Calculate B needed in Lambda_r0  
-    if shape == 'cylinder':
-        C_f = 2.5   # [-]
-    elif shape == 'sphere':
-        C_f = 1.25  # [-] 
-    else: 
-        print('WARNING: Specification of catalyst pellet shape in not recognized in calculations for radial thermal conductivity:', shape)
-        print('Proceeding with calculations for SPHERICAL catalyst')
-        print('\n')
-        C_f = 1.25
-    
+    # Calculate B needed in Lambda_r0  - for this we need some factor C_f based on cat. shape
+    C_f_library = {
+        'sphere': 1.25,
+        'cylinder': 2.5}
+    C_f = C_f_library[shape.lower()]
     B = C_f * ( (1-epsilon)/epsilon )**(10/9) # [-]
     
     # Calculate components of Lambda_r0
@@ -905,19 +912,39 @@ def radial_thermal_conductivity(u_s, rho_mix, Cp_mix, d_p, X_i, T_C, epsilon, N,
     # Calculate Lambda_r0 - stagnant thermal conductivity in packed beds
     Lambda_r0 = Lambda_f * ( k1 + k2*(k3*k4 + k5) ) # [W m-1 K-1]
     
-    
     # --- Calculate Peclet numbers 
     # Peclet radial heat transfer for fully developed turbulent flow
     Pe_h_inf = 8 * (2 - (1 - 2/N)**2) # [-]
     
     # Fluid Peclet number for heat transfer
-    Pe_h_0 = (u_s * rho_mix * Cp_mix * d_p) / Lambda_f 
+    Pe_h_0 = (u_s * rho_mix * Cp_mix * d_p) / Lambda_f
     
     # Radial thermal conductivity in packed bed [W m-1 K-1]
-    Lambda_er = Lambda_r0 + Lambda_f *( Pe_h_0/Pe_h_inf)
+    Lambda_er = Lambda_r0 + Lambda_f  *( Pe_h_0/Pe_h_inf)
+    # [W m-1 K-1]
     
+    # --- Heat transfer coefficient
+    # Heat transfer resistance between the reactor tube wall and catalyst bed has to be calculated
+    # Necessary when the ratio between tube and catalyst particle is small (d_t / d_p =< 100)  
+    # According to Mears https://doi.org/10.1016/0021-9517(71)90073-X
+
+     # The calculations below are only done for wall adjacent cell and thus are 1D arrays with number of axial cells
+
+    # Get gas mixture viscosity for only wall adjacent cells
+    mu_mix_wall = gas_mixture_viscosity(X_i[:, 0, :], T_C[0,:])
     
-    return Lambda_er # [W m-1 K-1]
+    # Calculate local Reynolds number in a packed bed
+    # https://neutrium.net/fluid-flow/packed-bed-reynolds-number/
+    Re = (d_p * u_s * rho_mix[0,:]) / (mu_mix_wall * (1 - epsilon))
+
+    # Prandtl number
+    Pr = (Cp_mix[0,:] * mu_mix_wall) / Lambda_f[0,:]
+    
+    # Heat transfer coefficient from Mears https://doi.org/10.1016/0021-9517(71)90073-X
+    h_t = (0.4 * Re**(1/2) + 0.2/Re**(2/3)) * Pr**0.4 * (1 - epsilon)/epsilon * Lambda_f[0,:]/d_p
+    # [W m-2 K-1]
+    
+    return Lambda_er, h_t
 
 
 
@@ -1666,7 +1693,6 @@ def interpolate_to_new_mesh(l_tube, r_tube,
 # --- Flow field initialization 
 
 
-
 def get_rate_fields(C_field, T_field, field_p, field_BET,
                           pi_limit):
     """
@@ -1811,22 +1837,22 @@ def advection_flux(phi_P, phi_W, phi_WW, dz, u_s, scheme):
 
     Parameters
     ----------
-    phi_P : 
+    phi_P : 2D/3D array
         Value at point P
-    phi_W : 
+    phi_W : 2D/3D array
         Value at point W.
-    phi_WW : TYPE
+    phi_WW : 2D/3D array
         Value at point WW.
-    dz : 
+    dz : 2D/3D array 
         [m] Cell axial size
-    u_s : TYPE
+    u_s : 1D array
         [m s-1] Superficial flow velocity (propagation speed)
-    scheme : 
+    scheme : int
         Advection scheme choice
 
     Returns
     -------
-    phi_flux : 
+    phi_flux : 2D/3D array
         Advection flux at point P
 
     """
@@ -1843,35 +1869,34 @@ def advection_flux(phi_P, phi_W, phi_WW, dz, u_s, scheme):
     return phi_flux
 
 
-
 def diffusion_flux(phi_P, phi_EX, phi_EXX, phi_IN, phi_INN, dr, r_P, p_s, scheme):
     """
     Calculate diffusion flux in radial (r) direction
 
     Parameters
     ----------
-    phi_P : TYPE
+    phi_P : 2D/3D array
         Value at point P.
-    phi_EX : TYPE
+    phi_EX : 2D/3D array
         Value at point EX.
-    phi_EXX : TYPE
+    phi_EXX : 2D/3D array
         Value at point EXX.
-    phi_IN : TYPE
+    phi_IN : 2D/3D array
         Value at point IN.
-    phi_INN : TYPE
+    phi_INN : 2D/3D array
         Value at point INN.
-    dr : TYPE
+    dr : 2D/3D array
         [m] Cell radial size.
     r_P : 
         [m] Cell radial distance from axis of symmetry
-    p_s : 
+    p_s : 1D array
         [] Propagation speed (Lambda_er or D_er)
-    scheme : 
+    scheme : int
         Diffusion scheme choice
 
     Returns
     -------
-    phi_flux : 
+    phi_flux : 3D array
         Diffusion flux at point P
 
     """
@@ -1901,8 +1926,153 @@ def diffusion_flux(phi_P, phi_EX, phi_EXX, phi_IN, phi_INN, dr, r_P, p_s, scheme
 
 
 
+def heat_diffusion_flux(phi_P, phi_EX, phi_EXX, phi_IN, phi_INN, dr, r_P, p_s, h_t, scheme):
+    """
+    Calculate heat diffusion flux in radial (r) direction
+    This function has some special treatment for wall cells that are not necessary in mass diffusion
+
+    Parameters
+    ----------
+    phi_P : 2D/3D array
+        Value at point P.
+    phi_EX : 2D/3D array
+        Value at point EX.
+    phi_EXX : 2D/3D array
+        Value at point EXX.
+    phi_IN : 2D/3D array
+        Value at point IN.
+    phi_INN : 2D/3D array
+        Value at point INN.
+    dr : 2D/3D array
+        [m] Cell radial size.
+    r_P : 
+        [m] Cell radial distance from axis of symmetry
+    p_s : 1D array
+        [] Propagation speed (Lambda_er or D_er)
+    h_t : 1D array
+        [W m-2 K-1] Heat transfer coefficient of tube-side film
+    scheme : int
+        Diffusion scheme choice
+
+    Returns
+    -------
+    phi_flux : 2D array
+        Diffusion flux at point P
+
+    """
+
+    # Coefficients for 1st derivative via central differencing scheme
+    # [EXX, EX, IN, INN, dr]
+    coeffs_1d = [[0, 1, -1, 0, 2],     # 2nd order CD
+                  [-1, 8, -8, 1, 12]]   # 4th order CD
+    
+    # Coefficients for 2nd derivative via central differencing scheme
+    # [EXX, EX, P, IN, INN, dr]
+    coeffs_2d = [[0, 1, -2, 1, 0, 1],           # 2nd order
+                 [-1, 16, -30, 16, -1, 12]]     # 4th order
+
+    f1 = coeffs_1d[scheme] # Multiplication factors for first derivative
+    f2 = coeffs_2d[scheme] # Multiplication factors for second derivative
+    
+    # first derivative evaluation
+    d_phi = (phi_EXX[1:]*f1[0] + phi_EX[1:]*f1[1] + phi_IN[1:]*f1[2] + phi_INN[1:]*f1[3]) / (dr[1:]*f1[4])
+    # Second derivative evaluation
+    d2_phi = (phi_EXX[1:]*f2[0] + phi_EX[1:]*f2[1] + phi_P[1:]*f2[2] + phi_IN[1:]*f2[3] + phi_INN[1:]*f2[4]) / (f2[5]*dr[1:]**2)
+    
+    
+    # --- Near wall cells
+    # Coefficients for 1st derivative via central differencing scheme - Wall adjacent cells
+    #               [P, IN, INN, dr]
+    coeffs_wall_1d = [[1, -1, 0, 1],     # 2nd order CD
+                      [3, -4, 1, 2]]   # 4th order CD
+    
+    # Coefficients for 2nd derivative via central differencing scheme - Wall adjacent cells
+    #               [P, IN, INN, INNN, dr]
+    coeffs_wall_2d = [[1, -2, 1, 0, 1],           # 2nd order
+                      [2, -5, 4, -1, 1]]     # 4th order
+    
+    f1 = coeffs_wall_1d[scheme] # Multiplication factors for first derivative
+    f2 = coeffs_wall_2d[scheme] # Multiplication factors for second derivative
+    
+    # Fluxes at the wall (r=R)
+    phi_wall = - (h_t / p_s[0,:]) * (phi_P[0,:] - phi_EX[0,:])
+    # Second derivative at point EX (first cell in the wall)
+    phi_EX = -phi_wall/2 
+    # it's (0-phi_wall)/2 which is average flux between wall interface and face between EX and EXX
+    # the flux between two wall cells (EX and EXX) is assumed zero - uniform temperature in the wall
+    
+    # first derivative evaluation
+    wall_d_phi = (( (phi_P[0]*f1[0] + phi_IN[0]*f1[1] + phi_INN[0]*f1[2]) / (dr[0]*f1[3])) + phi_wall) /2
+    # Second derivative evaluation
+    wall_d2_phi = (( (phi_P[0]*f2[0] + phi_IN[0]*f2[1] + phi_INN[0]*f2[2] + phi_INN[1]*f2[3]) / (f2[4]*dr[0]**2)) + phi_EX) /2
+    
+    # Stack the wall derivative array on top of field array
+    d_phi = np.vstack([wall_d_phi, d_phi])
+    d2_phi = np.vstack([wall_d2_phi, d2_phi])
+    
+    # Total flux     
+    phi_flux = p_s * (d2_phi + (1/r_P)*d_phi)
+    
+    # print(wall_d_phi)
+    # print(wall_d2_phi)
+    
+    return phi_flux
+
+
+
+
 
 def get_neighbour_fields(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wall_n):
+    """
+    Retrieves fields of neighbouring cells for Ci and T fields, simultaneously setting ghost cells 
+
+    Parameters
+    ----------
+    field_Ci_n : 3D array
+        [J mol-1 K-1] Specie concentration fields
+    field_T_n : 2D array
+        [C] Temperature field
+    cells_rad : int
+        [-] Number of cells in radial direction
+    C_in_n : 1D array
+        [J mol-1 K-1] Specie concentrations at inlet
+    T_in_n : float
+        [C] Inlet gas temperature
+    T_wall_n : 1D array
+        [C] Wall temperature array
+
+    Returns
+    -------
+    field_C_W : 3D array
+        	[J mol-1 K-1] Specie concentrations at neighbouring point W (west)
+    field_C_WW : 3D array
+        	[J mol-1 K-1] Specie concentrations at neighbouring point WW (west west)
+    field_C_E : 3D array
+        	[J mol-1 K-1] Specie concentrations at neighbouring point E (east)
+    field_C_EX : 3D array
+        	[J mol-1 K-1] Specie concentrations at neighbouring point EX (external)
+    field_C_EXX : 3D array
+        	[J mol-1 K-1] Specie concentrations at neighbouring point EXX (external external)
+    field_C_IN : 3D array
+        	[J mol-1 K-1] Specie concentrations at neighbouring point IN (internal)
+    field_C_INN : 3D array
+        	[J mol-1 K-1] Specie concentrations at neighbouring point INN (internal internal)
+    field_T_W : 2D array
+        	[C] Temperature at neighbouring point W (west)
+    field_T_WW : 2D array
+        	[C] Temperature at neighbouring point WW (west west)
+    field_T_E : 2D array
+        	[C] Temperature at neighbouring point E (east)
+    field_T_EX : 2D array
+        	[C] Temperature at neighbouring point EX (external)
+    field_T_EXX : 2D array
+        	[C] Temperature at neighbouring point EXX (external external)
+    field_T_IN : 2D array
+        	[C] Temperature at neighbouring point IN (internal)
+    field_T_INN : 2D array
+        	[C] Temperature at neighbouring point INN (internal internal)
+
+    """
     
     
     # Get fields of neighbouring cells
@@ -1974,11 +2144,11 @@ def RK4_fluxes(dt_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_cente
 
     Parameters
     ----------
-    dt_RK4 : array
+    dt_RK4 : 1D array
         [s] Array of RK4 timestep sizes
-    cells_rad :
+    cells_rad : int
         [-] Number of cells in radial direction
-    cells_ax : 
+    cells_ax : int
         [-] Number of cells in axial direction
     cell_V : array
         [m3] Cell volumes
@@ -2002,11 +2172,11 @@ def RK4_fluxes(dt_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_cente
         [m] Reactor tube radius
     T_wall_RK4 : 2D array
         [C] Array of Wall temperature at RK4 times
-    T_in_RK4 : array
+    T_in_RK4 : 1D array
         [C] Inlet fluid temperature at RK4 times
-    WF_in_RK : TYPE
+    WF_in_RK : 1D array
         [kg s mol-1] Catalyst weight per methanol molar flow rate at RK4 times
-    p_in_RK4 : array
+    p_in_RK4 : 1D array
        [Pa] Inlet fluid velocity at RK4 times
     p_set_pos : str
        (inlet / outlet) : Position at which pressure is given
@@ -2014,25 +2184,25 @@ def RK4_fluxes(dt_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_cente
         [J mol-1 K-1] Specie concentration field at time t 
     field_T : 2D array
         [T] Specie temperature field at time t 
-    bulk_rho_c : 
+    bulk_rho_c : float
         [kg m-3] Bulk catalyst density
-    BET_cat_P : 
+    BET_cat_P : 2D array
         [m2 kg-1] Surface area of fresh catalyst per mass
-    d_cat_part : 
+    d_cat_part : float
         [m] Catalyst particle diameter
-    cat_cp : 
+    cat_cp : float
         [J kg-1 K-1] Catalyst specific heat capacity
     cat_shape : string
         [sphere / cylinder] Shape of catalyst particles
-    d_tube : 
+    d_tube : float
         [m] Reactor tube inner diameter
-    l_tube :
+    l_tube : float
         [m] Reactor tube length
-    epsilon : 
+    epsilon : float
         [-] Packed bed porosity
-    N : 
+    N : float
         [-] Aspect ratio
-    pi_limit : 
+    pi_limit : float
         [bar] Partial pressure lower limit for reaction rate 
     nu_i : array
         [-] Effectivness factor for production / consumption of species i
@@ -2042,20 +2212,20 @@ def RK4_fluxes(dt_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_cente
         Choice of advection scheme
     diff_scheme : int
         Choice of diffusion scheme
-    gcells_z_in :
+    gcells_z_in : int
         [-] Number of ghost cells at inlet (axial)
-    gcells_z_out :
+    gcells_z_out : int
         [-] Number of ghost cells at outlet (axial)
-    gcells_r_wall :
+    gcells_r_wall : int
         [-] Number of ghost cells at reactor wall (radial)
-    gcells_r_ax : 
+    gcells_r_ax : int
         [-] Number of ghost cells at reactor axis of symmetry (radial)
 
     Returns
     -------
-    Ci_fluxes : array
+    Ci_fluxes : 3D array
         [J mol-1 K-1 s-1] Flux fields of specie concentrations
-    T_fluxes : array
+    T_fluxes : 2D array
         [C s-1] Flux field of temperature/heat
     """
     
@@ -2151,19 +2321,19 @@ def Euler_fluxes(D_er, v_n, p_P,
 
     Parameters
     ----------
-    D_er : 
+    D_er : 1D array 
         [m2 s-1] Effective radial diffusion coefficient in packed bed
-    v_n : 
+    v_n : 1D array
         [m s-] Superficial flow velocity
-    p_P : 
+    p_P : 1D array
         [Pa] Pressure at cell P
-    cell_dz : 
+    cell_dz : 2D array
         [m] Cell axial size
-    cell_dr : 
+    cell_dr : 2D array
         [m] Cell radial size
-    cell_V : 
+    cell_V : 2D array
         [m3] Cell volume
-    cell_r_center : 
+    cell_r_center : 2D array
         [m] Cell center radial position
     Ci_P : 3D array
         [J mol-1 K-1] Specie concentrations at point P
@@ -2193,25 +2363,25 @@ def Euler_fluxes(D_er, v_n, p_P,
         [C] Temperature at neighbouring point EX
     T_EXX : 2D array
         [C] Temperature at neighbouring point EXX
-    bulk_rho_c : 
+    bulk_rho_c : float
         [kg m-3] Bulk catalyst density
     BET_cat_P : 2D array
         [m2 kg-1] Surface area of fresh catalyst per mass
-    d_cat_part : 
+    d_cat_part : float
         [m] Catalyst particle diameter
-    cat_cp :
+    cat_cp : float
         [J kg-1 K-1] Catalyst specific heat capacity        
     cat_shape : string
         [sphere / cylinder] Shape of catalyst particles
-    epsilon : 
+    epsilon : float 
         [-] Packed bed porosity
-    N : 
+    N : float
         [-] Aspect ratio
     adv_scheme : int
         Choice of advection scheme
     diff_scheme : int
         Choice of diffusion scheme
-    pi_limit : 
+    pi_limit : float
         [bar] Partial pressure lower limit for reaction rate 
     nu_i : array
         [-] Effectivness factor for production / consumption of species i
@@ -2221,9 +2391,9 @@ def Euler_fluxes(D_er, v_n, p_P,
 
     Returns
     -------
-    mass_flux : array 
+    mass_flux : 3D array 
         [-] Fluxes (dCi / dt) in specie concentration fields
-    heat_flux : 
+    heat_flux : 2D array
         [-] Flux (dT / dt) in temperature (heat) field 
 
     """
@@ -2260,14 +2430,14 @@ def Euler_fluxes(D_er, v_n, p_P,
     # Density of a mixture 
     rho_mix_mol = mol_density_mixture(Ci_P) 
     # Effective radial thermal conductivity
-    Lambda_er = radial_thermal_conductivity(v_n, rho_mix_mol, Cp_mix, d_cat_part, X_i, T_P, epsilon, N, shape='sphere')    
+    Lambda_er, h_t = radial_thermal_conductivity(v_n, rho_mix_mol, Cp_mix, d_cat_part, X_i, T_P, epsilon, N, shape='sphere')    
     
     # Heat advection term
     heat_coeff = v_n  * Cp_mix * rho_mix_mol
     heat_adv_i = advection_flux(T_P, T_W, T_WW, cell_dz, heat_coeff, adv_scheme)
 
     # Heat diffusion term
-    heat_diff_i = diffusion_flux(T_P, T_EX, T_EXX, T_IN, T_INN, cell_dr, cell_r_center, Lambda_er, diff_scheme)
+    heat_diff_i = heat_diffusion_flux(T_P, T_EX, T_EXX, T_IN, T_INN, cell_dr, cell_r_center, Lambda_er, h_t, diff_scheme)
     
     # Heat source / sink from individual reactions
     source_R = nu_j * r_R * (- enthalpy_R(Cp_i, T_P) )
@@ -2293,6 +2463,72 @@ def steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_w
                            rho_cat_bulk, field_BET_cat, d_cat_part, cat_cp, cat_shape,
                            epsilon, N, adv_index, diff_index, pi_limit, nu_i, nu_j,\
                            relax):
+    """
+    Calculates CRANK NICHOLSON fluxes for concentration Ci and temperature T fields 
+
+    Parameters
+    ----------
+    field_Ci_n : 3D array
+        [J mol-1 K-1] Specie concentration field
+    field_T_n : 2D array
+        [C] Specie temperature field
+    cells_rad : int
+        [-] Number of cells in radial direction
+    C_in_n : 1D array
+        [J mol-1 K-1] Specie concentration field at inlet
+    T_in_n : float
+        [C] Inlet fluid temperature 
+    T_wall_n : 1D array
+        [C] Array of Wall temperature
+    field_D_er : 1D array
+        [m2 s-1] Effective radial diffusion coefficient in packed bed
+    field_v : 1D array
+        [m s-1] Array of field velocities
+    field_p : 1D array
+        [Pa] Pressure at cell P
+    dz_mgrid : 2D array
+        [m] Meshgrid of dz sizes
+    dr_mgrid : 2D array
+        [m] Meshgrid of  dr sizes
+    cell_V : 2D array
+        [m3] Cell volumes
+    r_centers_mgrid: 2D array   
+        [m] Meshgrid of r cell centers
+    rho_cat_bulk : float
+        [kg m-3] Bulk catalyst density
+    field_BET_cat : 2D array
+        [m2 kg-1] Surface area of catalyst per mass
+    d_cat_part : float
+        [m] Catalyst particle diameter
+    cat_cp : float
+        [J kg-1 K-1] Catalyst specific heat capacity
+    cat_shape : string
+        [sphere / cylinder] Shape of catalyst particles
+    epsilon : float
+        [-] Packed bed porosity
+    N : float
+        [-] Aspect ratio
+    adv_index : int
+        Choice of advection scheme
+    diff_index : int
+        Choice of diffusion scheme
+    pi_limit : float
+        [bar] Partial pressure lower limit for reaction rate 
+    nu_i : array
+        [-] Effectivness factor for production / consumption of species i
+    nu_j : array
+        [-] Effectiveness factor for reaction j
+    relax : float
+        [-] Under-relaxation factor
+
+    Returns
+    -------
+    C_fluxes_CN : 3D array
+        [J mol-1 K-1 s-1] Flux fields of specie concentrations
+    T_fluxes_CN : 2D array
+        [C s-1] Flux field of temperature/heat
+
+    """
     
      # Get fields of neighbouring cells
     field_C_W, field_C_WW, field_C_E, \
@@ -2338,11 +2574,6 @@ def steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_w
 
 
 
-
-
-
-
-
 def steady_Euler_fluxes(D_er, v_n, p_P,
         cell_dz, cell_dr, cell_V, cell_r_center,
         Ci_P, Ci_W, Ci_WW, Ci_IN, Ci_INN, Ci_EX, Ci_EXX,
@@ -2355,19 +2586,19 @@ def steady_Euler_fluxes(D_er, v_n, p_P,
 
     Parameters
     ----------
-    D_er : 
+    D_er : 1D array
         [m2 s-1] Effective radial diffusion coefficient in packed bed
-    v_n : 
+    v_n : 1D array
         [m s-] Superficial flow velocity
-    p_P : array
+    p_P : 1D array
         [Pa] Pressure at cell P
-    cell_dz : 
+    cell_dz : 2D array
         [m] Cell axial size
-    cell_dr : 
+    cell_dr : 2D array
         [m] Cell radial size
-    cell_V : 
+    cell_V : 2D array
         [m3] Cell volume
-    cell_r_center : 
+    cell_r_center : 2D array
         [m] Cell center radial position
     Ci_P : 3D array
         [J mol-1 K-1] Specie concentrations at point P
@@ -2397,25 +2628,25 @@ def steady_Euler_fluxes(D_er, v_n, p_P,
         [C] Temperature at neighbouring point EX
     T_EXX : 2D array
         [C] Temperature at neighbouring point EXX
-    bulk_rho_c : 
+    bulk_rho_c : float
         [kg m-3] Bulk catalyst density
-    BET_cat_P : 
+    BET_cat_P : 2D array
         [m2 kg-1] Surface area of fresh catalyst per mass
-    d_cat_part : 
+    d_cat_part : float
         [m] Catalyst particle diameter
-    cat_cp :
+    cat_cp : float
         [J kg-1 K-1] Catalyst specific heat capacity        
     cat_shape : string
         [sphere / cylinder] Shape of catalyst particles
-    epsilon : 
+    epsilon : float
         [-] Packed bed porosity
-    N : 
+    N : float
         [-] Aspect ratio
     adv_scheme : int
         Choice of advection scheme
     diff_scheme : int
         Choice of diffusion scheme
-    pi_limit : 
+    pi_limit : float
         [bar] Partial pressure lower limit for reaction rate 
     nu_i : array
         [-] Effectivness factor for production / consumption of species i
@@ -2425,13 +2656,13 @@ def steady_Euler_fluxes(D_er, v_n, p_P,
 
     Returns
     -------
-    mass_flux : array 
+    mass_flux : 3D array 
         [-] Fluxes (dCi / dt) in specie concentration fields
-    heat_flux : 
+    heat_flux : 2D array
         [-] Flux (dT / dt) in temperature (heat) field 
 
     """
-
+    
     # --- Mass transport 
     # Mass advection term
     mass_adv_i = advection_flux(Ci_P, Ci_W, Ci_WW, cell_dz, v_n, adv_scheme)
@@ -2462,14 +2693,14 @@ def steady_Euler_fluxes(D_er, v_n, p_P,
     # Density of a mixture 
     rho_mix_mol = mol_density_mixture(Ci_P) 
     # Effective radial thermal conductivity
-    Lambda_er = radial_thermal_conductivity(v_n, rho_mix_mol, Cp_mix, d_cat_part, X_i, T_P, epsilon, N, shape='sphere')    
+    Lambda_er, h_t = radial_thermal_conductivity(v_n, rho_mix_mol, Cp_mix, d_cat_part, X_i, T_P, epsilon, N, shape='sphere')    
     
     # Heat advection term
     heat_coeff = v_n  * Cp_mix * rho_mix_mol
     heat_adv_i = advection_flux(T_P, T_W, T_WW, cell_dz, heat_coeff, adv_scheme)
 
     # Heat diffusion term
-    heat_diff_i = diffusion_flux(T_P, T_EX, T_EXX, T_IN, T_INN, cell_dr, cell_r_center, Lambda_er, diff_scheme)
+    heat_diff_i = heat_diffusion_flux(T_P, T_EX, T_EXX, T_IN, T_INN, cell_dr, cell_r_center, Lambda_er, h_t, diff_scheme)
                         
     # Heat source / sink from individual reactions
     source_R = nu_j * r_R * (- enthalpy_R(Cp_i, T_P) )
