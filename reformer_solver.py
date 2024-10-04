@@ -30,6 +30,9 @@ import model_funcs as mf
 import io_funcs as io
 
 
+import global_vars as gv
+
+
 # -------------------------------------------------
 # ------ SCRIPT PRE-RUN VARIABLES
 # -------------------------------------------------
@@ -48,21 +51,21 @@ start_time = datetime.now()
 timestamp = start_time.strftime("%y-%d-%m--%H-%M") # get timestamp for directory names
 original_stdout = sys.stdout # save original stdout
 
-
+# !!! s_tube, rho_tube, h_tube, cp_tube,
 # -------------------------------------------------
 # ------ INPUTS 
 # -------------------------------------------------
 
 # --- Read all inputs from .json file
 cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bulk, cat_composition, \
-    n_tubes, l_tube, d_tube, \
+    n_tubes, l_tube, d_tube, s_tube, rho_tube, h_tube, cp_tube,\
     cells_ax, cells_rad, adv_scheme, diff_scheme, CFL, pi_limit, Ci_limit,\
-    SC_ratio, p_ref_n, p_set_pos, T_in_n, init_T_field, T_wall_n, WF_in_n,\
+    SC_ratio, p_ref_n, p_set_pos, T_in_n, init_T_field, WF_in_n,\
     sim_type, max_iter, convergence, relax, dt, t_dur, dyn_bc, cont_sim, path_old_sim_data,\
     results_dir_name, saving_only_terminal, steady_save_every, dyn_save_every, dynsim_converge_first, dynsim_cont_converg,\
     steady_write_every, dyn_write_every, keep_last_jsons, saving_timestamp, saving_json_out, saving_log, saving_files_in = io.simulation_inputs(input_json_fname)
        
-    
+
     
 '''   
 # --- Catalyst parameters
@@ -79,6 +82,10 @@ cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bul
 # n_tubes   [-] Total number of tubes in the reactor
 # l_tube    [m] single tube length
 # d_tube    [m] single tube diameter
+# s_tube    [m] reactor tube thickness
+# rho_tube  [kg m-3] tube material density
+# h_tube    [W m-1 K-1] tube material thermal conductivity
+# cp_tube   [J kg-1 K-1] tube material specific heat capacity
 
 # --- Numerical/discretization parameters 
 # cells_ax  [-] number of axial cells
@@ -94,7 +101,6 @@ cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bul
 # p_set_pos  [str] Position at which reactor pressure is given (inlet / outlet)
 # T_in_n   [C] inlet flow temperature
 # init_T_field  [C] Initial temperature in the reactor
-# T_wall_n   [C] tube wall temperature (shell side temperature)
 # WF_in_n   [kg s mol-1] - convert this to volumetric flow rate and velocity
 
 # --- Simulation parameters
@@ -126,25 +132,18 @@ R = 8.31446261815324 # Universal gas constant [J K-1 mol-1]
 uniform_dz = True  # Parameter to check whether uniform axial mesh with constant dz is used
 
 
-# Effectiveness factors
-nu_i = 1
-nu_j = 1
-
 '''
 TO ADD
 '''
 
-# CODE IN: 
+# !!! CODE IN: 
     # Effectiveness factors
     # Add residuals to dynamic sym
     # n_tubes - handle this somehow? - maybe in postprocessing. only relevant if i have burner gas in this sim
 
-# BELOW - These are for dt recalculation
-# ok to delete if i give up on dt recalculation
-# !!! - I will delete 
-max_Ci_drop = 0.8 # Maximum allowed drop of concentration in a specie 
-max_dt_increase = 0.2 # Maximum allowed timestep increase
-
+    # Effectiveness factors
+nu_i = 1
+nu_j = 1
 
 
 # -------------------------------------------------
@@ -192,7 +191,7 @@ p_ref_n = p_ref_n * 1e5 # Convert to Pascal
 if cont_sim == 'yes':
     
     # --- Read parameters and fields from .json file
-    t_abs, field_Ci_n, field_T_n, field_p, field_v, field_BET_cat,\
+    t_abs, field_Ci_n, field_T_n, field_p, field_v, field_BET_cat, T_wall_n,\
         SC_ratio, n_tubes, l_tube, d_tube, N, epsilon, cells_ax_old, cells_rad_old,\
         cat_shape, cat_dimensions, rho_cat, rho_cat_bulk, cat_composition, cat_cp, cat_BET_area = io.read_cont_sim_data(path_old_sim_data)
     
@@ -276,6 +275,9 @@ elif cont_sim == 'no':
     
     # Make temperature field
     field_T_n = np.ones((cells_rad, cells_ax)) * init_T_field
+    
+    # Take initial wall temperature guess to be the same as outer cell in T field
+    T_wall_n = field_T_n[0,:]
 
     # Make concentration array
     field_Ci_n = np.zeros((5, cells_rad, cells_ax)) # Empty array
@@ -307,8 +309,17 @@ t_rel = 0.
 
 # Read dynamic simulation boundary conditions and make a function from it 
 if sim_type == 'dynamic':
-    T_wall_func, T_in_func, WF_in_func, p_ref_func = io.read_and_set_BCs(input_json_fname, dyn_bc, T_wall_n, T_in_n, WF_in_n, p_ref_n, cell_z_centers, l_tube)
+    T_in_func, WF_in_func, p_ref_func = io.read_and_set_BCs(input_json_fname, dyn_bc, T_in_n, WF_in_n, p_ref_n)
     # We do this now because then we have BCs in the script and we don't need the input .json anymore
+
+# Get wall heating choice, and make a class (Twall_func) in global_vars that has wall temperature methods for steady and dynamic operation
+# Also get a temperature function that 
+wall_heating = mf.read_and_set_T_wall_BC(input_json_fname, dyn_bc, cell_z_centers, l_tube)
+
+# Add some unchanging variables to this class that uses it in some methods 
+gv.Twall_func.d_p = d_cat_part
+gv.Twall_func.epsilon = epsilon
+
 
 '''
 Things to add here:
@@ -334,7 +345,7 @@ if diff_scheme == 'central_2o':
     print('Diffusion (r) discretization scheme:'.ljust(colw) +'{0}'.format('Central differencing 2nd order'))
 elif diff_scheme == 'central_4o':
     print('Diffusion (r) discretization scheme:'.ljust(colw) +'{0}'.format('Central differencing 4th order'))
-
+    
 if sim_type == 'steady':
     print('\n# --- Steady simulation parameters:')
     print('Maximum iterations:'.ljust(colw) +'{0}'.format(max_iter))
@@ -407,13 +418,13 @@ counter_save = 0
 
 # --- Simulation setup file write - one time writing
 # List of name keys for file writing
-names = ['simulation type', 'simulated time', 'S/C', 'n tubes', 'tube l', 'tube r', 'tube V' ,'aspect ratio', 'porosity',\
+names = ['simulation type', 'simulated time', 'S/C', 'wall heating type' ,'n tubes', 'tube l', 'tube r', 'tube V' ,'aspect ratio', 'porosity',\
          'n ax cells', 'n rad cells', 'dz', 'dy', 'cell z centers', 'cell r centers', 'cell volumes',\
          'cat shape', 'cat dimensions', 'cat particle d', 'fresh cat BET', 'cat composition', 'cat cp', 'cat rho', 'cat rho bulk', 'cat tube weight']
 
 if sim_type == 'steady' : t_dur = 'n/a' # simulation duration not applicable if we have steady simulation
 # List of fields and values for .json file writing
-values = [sim_type, t_dur, SC_ratio, n_tubes, l_tube, r_tube, V_tube, N, epsilon,\
+values = [sim_type, t_dur, SC_ratio, wall_heating, n_tubes, l_tube, r_tube, V_tube, N, epsilon,\
           cells_ax, cells_rad, cell_dz, cell_dr, cell_z_centers, cell_r_centers, cell_V,\
           cat_shape, cat_dimensions, d_cat_part, cat_BET_area, cat_composition, cat_cp, rho_cat, rho_cat_bulk, W_cat]
 
@@ -430,6 +441,7 @@ z_centers_mgrid, r_centers_mgrid = np.meshgrid(cell_z_centers, cell_r_centers)
 # ------ STEADY SIMULATION
 # -------------------------------------------------
 
+
 converg_flag = False # Flag for recognizing convergence
 
 if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson scheme for steady state 
@@ -445,7 +457,7 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
              'CH3OH', 'H2O', 'H2', 'CO2', 'CO',\
              'T', 'BET',\
              'rate MSR', 'rate MD', 'rate WGS', 'rate CH3OH', 'rate H2O', 'rate H2', 'rate CO2', 'rate CO'] 
-        
+       
     # Small function that updates writing values
     steady_value_list = lambda : [sim_type, t_abs, 0, iteration,\
               C_in_n, WF_in_n, T_in_n, T_wall_n, Q_in_n, Q_out_n, m_inlet, m_outlet,\
@@ -471,8 +483,12 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
         
     write_out_json_steady(names, values, path_sim_data, t_abs, 0)
     
+    
     # Enter a while loop, condition to drop below convergence limit
     for iteration in range(1,max_iter+1):
+
+        # Calculate/retrieve wall temperature
+        T_wall_n = gv.Twall_func.steady(relax, T_wall_n, field_Ci_n[:,0,:], field_T_n[0,:], field_v)
         
         # Get steady fluxes from crank nicholson scheme
         C_fluxes_CN, T_fluxes_CN = mf.steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wall_n,\
@@ -569,14 +585,14 @@ if sim_type == 'dynamic':
     # --- Simulation setup file write - future writing
     # List of name keys for file writing
     names = ['simulation type', 't', 'dt', \
-             'C in', 'W/F in', 'T in', 'T wall', 'Q in', 'Q out', 'm in', 'm out',\
+             'C in', 'W/F in', 'T in', 'I', 'T wall', 'Q in', 'Q out', 'm in', 'm out',\
              'v in', 'v out', 'v', 'p in', 'p out', 'p', \
              'CH3OH', 'H2O', 'H2', 'CO2', 'CO',\
              'T', 'BET',\
              'rate MSR', 'rate MD', 'rate WGS', 'rate CH3OH', 'rate H2O', 'rate H2', 'rate CO2', 'rate CO'] 
     
     dynamic_value_list = lambda : [sim_type, round(t_abs,7), dt,\
-              C_in_n, WF_in_n, T_in_n, T_wall_n, Q_in_n, Q_out_n, m_inlet, m_outlet,\
+              C_in_n, WF_in_n, T_in_n, gv.Twall_func.I_func(t_abs), T_wall_n, Q_in_n, Q_out_n, m_inlet, m_outlet,\
               v_in_n, v_out_n, field_v, p_in_n, p_out_n, field_p, \
               np.asarray(field_Ci_n[0]), np.asarray(field_Ci_n[1]), np.asarray(field_Ci_n[2]), np.asarray(field_Ci_n[3]), np.asarray(field_Ci_n[4]),\
               field_T_n, field_BET_cat,\
@@ -593,13 +609,9 @@ if sim_type == 'dynamic':
     # Empty array of temperatures for time n+1
     field_T_n1 = copy.deepcopy(field_T_n)
         
-    # Functions for dynamic boundary condition - already made from earlier in the script
-    # T_wall_func, T_in_func, WF_in_func, p_ref_func = ...
-
     # Effectiveness factors?
     
     # Get values from dynamic BC file
-    T_wall_n = T_wall_func(t_rel)
     T_in_n = T_in_func(t_rel)
     p_ref_n = p_ref_func(t_rel)
     WF_in_n = WF_in_func(t_rel)
@@ -629,9 +641,7 @@ if sim_type == 'dynamic':
             # --- RK4 arrays
             # Time 
             RK_dt = np.asarray([0, dt/2, dt/2, dt])
-            # Wall temperature
-            RK_T_wall = np.asarray([T_wall_n, T_wall_func(t_rel + dt/2), T_wall_func(t_rel+dt)])
-            RK_T_wall = np.insert(RK_T_wall, 1, RK_T_wall[1], 0)
+            RK_times = RK_dt + t_rel
             # Inlet temperature
             RK_T_in = np.asarray([T_in_n, T_in_func(t_rel + dt/2), T_in_func(t_rel+dt)])
             RK_T_in = np.insert(RK_T_in, 1, RK_T_in[1])
@@ -643,10 +653,10 @@ if sim_type == 'dynamic':
             RK_WF_in = np.insert(RK_WF_in, 1, RK_WF_in[1])
             
             # --- Calculate fluxes with Runge Kutta 4th order scheme
-            Ci_fluxes, T_fluxes = mf.RK4_fluxes(RK_dt, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_centers,
+            Ci_fluxes, T_fluxes = mf.RK4_fluxes(RK_dt, RK_times, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_centers,
                 dz_mgrid, dr_mgrid, z_centers_mgrid, r_centers_mgrid,
                 W_cat, SC_ratio, r_tube,
-                RK_T_wall, RK_T_in, RK_WF_in, RK_p_ref, p_set_pos,
+                T_wall_n, RK_T_in, RK_WF_in, RK_p_ref, p_set_pos,
                 field_Ci_n, field_T_n,
                 rho_cat_bulk, field_BET_cat, d_cat_part, cat_cp, cat_shape, d_tube, l_tube,
                 epsilon, N, pi_limit, nu_i, nu_j, adv_index, diff_index)
@@ -672,7 +682,8 @@ if sim_type == 'dynamic':
             v_in_prev = v_in_n
         
             # Boundary conditions
-            T_wall_n = T_wall_func(t_rel)
+            T_wall_n = gv.Twall_func.dynamic(t_rel, dt, T_wall_n, field_Ci_n[:,0,:], field_T_n[0,:], field_v)
+            
             T_in_n = T_in_func(t_rel)
             p_ref_n = p_ref_func(t_rel)
             WF_in_n = WF_in_func(t_rel)
