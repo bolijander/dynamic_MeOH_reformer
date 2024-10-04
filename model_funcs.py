@@ -8,8 +8,13 @@ import numpy as np
 import math
 from scipy.interpolate import RectBivariateSpline 
 
+import json
+
 import copy
 import sys
+
+
+import global_vars as gv
 
 ''' 
 ==============================================================================================================================
@@ -297,8 +302,6 @@ def Cp_species(T_C):
 
     Parameters
     ----------
-    specie : string     
-        Specie name
     T_C :                 
         [C] Temperature
 
@@ -324,7 +327,7 @@ def Cp_species(T_C):
     
 
     
-def Cp_mixture(X_i, C_p, T):
+def Cp_mixture(X_i, C_p):
     """
     Calculate SPECIFIC HEAT CAPACITY of a mixture at given temperature
 
@@ -334,8 +337,6 @@ def Cp_mixture(X_i, C_p, T):
         [-] Molar fractions of components
     C_p : array         
         [J mol-1 K-1] Specific heat capacities of individual species
-    T :                 
-        [C] Temperature
 
     Returns
     -------
@@ -427,8 +428,9 @@ def density_mixture(C_i, V, P, T_C):
     # rho = (mol_mass * p_ / (R * T)
     rho_mix = (mol_mass_mix * P) / (R*T)
     
-    
     return rho_mix
+
+
 
 def mol_density_mixture(C_i):
     """
@@ -448,6 +450,38 @@ def mol_density_mixture(C_i):
     rho_mix = sum(C_i)    
     
     return rho_mix
+
+
+def superficial_mass_velocity(C_i, u_s):
+    """
+    Calculate SUPERFICIAL MASS VELOCITY within a computational cell
+
+    Parameters
+    ----------
+    C_i : 3D array
+        [mol m-3] Molar concentration arrays
+    u_s : 1D array
+        [m s-1] Superficial fluid velocity array
+
+    Returns
+    -------
+    G : 1D array
+        [kg m-2 s-1] Superficial mass velocity
+
+    """
+    # Make a deep copy as not to mess up the original
+    Ci_copy = copy.deepcopy(C_i)
+    
+    # Calculate the molar weight 
+    for i in range(5):
+        Ci_copy[i] *= Specie._reg[i].mol_mass # [g m-3]
+    
+    rho_mix = sum(Ci_copy)/1000 # total density within the computational cell + convert to [kg m-3]
+    
+    # Get superficial fl
+    G = rho_mix * u_s
+    
+    return G
 
 
 def SC_ratio_to_concentration(SC_ratio, p, T_C, Q, A_inlet):
@@ -820,7 +854,7 @@ def aspect_ratio(d_ti, d_p):
     return N
 
 
-def radial_thermal_conductivity(u_s, rho_mix, Cp_mix, d_p, X_i, T_C, epsilon, N, shape='sphere'):
+def radial_thermal_conductivity(u_s, rho_mix, Cp_mix, d_p, X_i, T_C, epsilon, N, Ci_near_wall, shape='sphere'):
     """
     Calculate effective RADIAL THERMAL CONDUCTIVITY in a packed bed
 
@@ -842,6 +876,8 @@ def radial_thermal_conductivity(u_s, rho_mix, Cp_mix, d_p, X_i, T_C, epsilon, N,
         [-] Packed bed porosity
     N : float            
         [-] Reactor aspect ratio
+    Ci_near_wall : 1D array
+        [mol m-3] Concentrations near the tube wall
     shape : string      
         [-] catalyst particle shape (cylinder / sphere)
 
@@ -933,9 +969,13 @@ def radial_thermal_conductivity(u_s, rho_mix, Cp_mix, d_p, X_i, T_C, epsilon, N,
     # Get gas mixture viscosity for only wall adjacent cells
     mu_mix_wall = gas_mixture_viscosity(X_i[:, 0, :], T_C[0,:])
     
+    # Superficial mass velocity 
+    G = superficial_mass_velocity(Ci_near_wall, u_s)
+    
     # Calculate local Reynolds number in a packed bed
     # https://neutrium.net/fluid-flow/packed-bed-reynolds-number/
-    Re = (d_p * u_s * rho_mix[0,:]) / (mu_mix_wall * (1 - epsilon))
+    # Re = (d_p * u_s * rho_mix[0,:]) / (mu_mix_wall * (1 - epsilon))
+    Re = (d_p * G) / (mu_mix_wall * (1 - epsilon))
 
     # Prandtl number
     Pr = (Cp_mix[0,:] * mu_mix_wall) / Lambda_f[0,:]
@@ -943,8 +983,105 @@ def radial_thermal_conductivity(u_s, rho_mix, Cp_mix, d_p, X_i, T_C, epsilon, N,
     # Heat transfer coefficient from Mears https://doi.org/10.1016/0021-9517(71)90073-X
     h_t = (0.4 * Re**(1/2) + 0.2/Re**(2/3)) * Pr**0.4 * (1 - epsilon)/epsilon * Lambda_f[0,:]/d_p
     # [W m-2 K-1]
-    
+
     return Lambda_er, h_t
+
+
+
+
+
+
+def heat_transfer_coeff_tube(u_s, d_p, T_C, C_i, epsilon):
+    """
+    Calculate heat transfer coefficient on the tube side of the reactor
+
+    Parameters
+    ----------
+    u_s : 1D array              
+        [m s-] Superficial flow velocity
+    d_p : float          
+        [m] (effective) diameter of catalyst particle
+    T_C : 1D array            
+        [C] Temperature of near wall cells
+    C_i : 2D array            
+        [mol m-3] Concentration at near wall cells
+    epsilon : float      
+        [-] Packed bed porosity
+        
+    Returns
+    -------
+    h_t : 1D array
+        [W m-2 K-1] Heat transfer coefficient of the tube-side film
+    
+    """
+    
+    # Convert temperature to Kelvin 
+    T = T_C + 273.15
+    
+    
+    X_i_wall = concentration_to_mole_fraction(C_i) 
+    # Get Cp of individual species at temperature T
+    Cp_i_wall = Cp_species(T_C)
+    # Get Cp of mixture
+    Cp_wall_mix = Cp_mixture(X_i_wall, Cp_i_wall) 
+    
+    # Lambda_i - thermal conductivites of component i
+    Lambda_i = np.zeros((5, np.shape(T)[0] ,np.shape(T)[1]))
+    
+    for i in range(5):
+        Lambda_i[i] = Specie._reg[i].La + Specie._reg[i].Lb*T + Specie._reg[i].Lc*T**2 + Specie._reg[i].Ld*T**3 +Specie._reg[i].Le*(1/T)**2
+    
+    
+    # Lambda_i is in unit [mW m-1 K-1], convert to [W m-1 K-1]
+    Lambda_i = Lambda_i * 0.001
+    
+    # NOTE: Array Lambda_i will be the numerators in calculation of Lambda_f
+    
+    # Calculate denominators - use np.ones to avoid adding one to each denominator sum
+    Lambda_f_denoms = np.ones((5, np.shape(T)[0] ,np.shape(T)[1]))
+    
+    # Calculate arrays of denominators
+    for i in range(5): # i loop - numerator
+        j_list = list(range(5))
+        j_list.remove(i) # Make list for j loop and remove overlapping element
+        for j in j_list: # j loop - denominator
+            phi_ij = (Specie._reg[j].mol_mass / Specie._reg[i].mol_mass)**(1/2) 
+                
+            # sum of phi 
+            Lambda_f_denoms[i] += phi_ij * np.divide(X_i_wall[j], X_i_wall[i], out=np.zeros_like(X_i_wall[j]), where=X_i_wall[i]!=0) # This np divide with special treatment is here to avoid division by zero in matrices
+
+    # divide and sum up - zeros in numerator cancel out ones in denominator
+    Lambda_f = sum(Lambda_i/Lambda_f_denoms) # [W m-1 K-1]
+    
+    # --- Heat transfer coefficient
+    # Heat transfer resistance between the reactor tube wall and catalyst bed has to be calculated
+    # Necessary when the ratio between tube and catalyst particle is small (d_t / d_p =< 100)  
+    # According to Mears https://doi.org/10.1016/0021-9517(71)90073-X
+
+     # The calculations below are only done for wall adjacent cell and thus are 1D arrays with number of axial cells
+
+    # Get gas mixture viscosity for only wall adjacent cells
+    mu_mix_wall = gas_mixture_viscosity(X_i_wall, T_C)
+    
+    G = superficial_mass_velocity(C_i, u_s)
+    
+    # Calculate local Reynolds number in a packed bed
+    # https://neutrium.net/fluid-flow/packed-bed-reynolds-number/
+    # Re = (d_p * u_s * rho_wall_mix) / (mu_mix_wall * (1 - epsilon))
+    Re = (d_p * G) / (mu_mix_wall * (1 - epsilon))
+
+    # Prandtl number
+    Pr = (Cp_wall_mix * mu_mix_wall) / Lambda_f
+    
+    # Heat transfer coefficient from Mears https://doi.org/10.1016/0021-9517(71)90073-X
+    h_t = (0.4 * Re**(1/2) + 0.2/Re**(2/3)) * Pr**0.4 * (1 - epsilon)/epsilon * Lambda_f/d_p
+    # [W m-2 K-1]
+
+    return h_t
+
+
+
+
 
 
 
@@ -2130,7 +2267,7 @@ def get_neighbour_fields(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wal
 
 
 
-def RK4_fluxes(dt_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_centers,
+def RK4_fluxes(dt_RK4, times_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_centers,
         dz_mgrid, dr_mgrid, z_centers_mgrid, r_centers_mgrid,
         W_cat, SC_ratio, r_tube, 
         T_wall_RK4, T_in_RK4, WF_in_RK4, p_in_RK4, p_set_pos,
@@ -2146,6 +2283,8 @@ def RK4_fluxes(dt_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_cente
     ----------
     dt_RK4 : 1D array
         [s] Array of RK4 timestep sizes
+    times_RK4 : 1D array
+        [s] Array of absolute times in the simulation
     cells_rad : int
         [-] Number of cells in radial direction
     cells_ax : int
@@ -2170,8 +2309,10 @@ def RK4_fluxes(dt_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_cente
         [-] Steam to carbon ration
     r_tube : float 
         [m] Reactor tube radius
-    T_wall_RK4 : 2D array
-        [C] Array of Wall temperature at RK4 times
+    calculate_T_wall_dynamic_RK4 : function 
+        Function to calculate wall temperature profile inside RK4
+    T_wall_RK4 : 1D array
+        [C] Wall temperature profile
     T_in_RK4 : 1D array
         [C] Inlet fluid temperature at RK4 times
     WF_in_RK : 1D array
@@ -2229,12 +2370,10 @@ def RK4_fluxes(dt_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_cente
         [C s-1] Flux field of temperature/heat
     """
     
-    
     # Make empty flux fields. remember - no ghost cells here 
     C_flux_arrays = np.zeros((4, 5, cells_rad, cells_ax))
     T_flux_arrays = np.zeros((4, cells_rad, cells_ax))
   
-    
     # Make temporary value array
     # Need to do a deep copy, otherwise the original gets changed as well
     C_array = copy.deepcopy(field_Ci)
@@ -2252,13 +2391,16 @@ def RK4_fluxes(dt_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_cente
             X_in_RK, X_out_RK, mu_in_RK, mu_out_RK = get_IO_velocity_and_pressure(p_in_RK4[RKt], p_set_pos, T_in_RK4[RKt], WF_in_RK4[RKt], SC_ratio, W_cat, epsilon, r_tube, l_tube, d_cat_part, cell_z_centers)
         # Radial diffusion coefficient
         D_er_RK = radial_diffusion_coefficient(field_v_RK, d_cat_part, d_tube)
-
+        
+        # Calculate wall temperature profile
+        T_wall_RK4 = gv.Twall_func.dynamic(times_RK4[RKt], dt_RK4[RKt], T_wall_RK4, C_array[:,0,:], T_array[0,:], field_v_RK)
+        
         # Get neighbouring cell fields                
         field_C_W, field_C_WW, field_C_E, \
             field_C_EX, field_C_EXX, field_C_IN, field_C_INN, \
             field_T_W, field_T_WW, field_T_E, \
-                field_T_EX, field_T_EXX, field_T_IN, field_T_INN = get_neighbour_fields(C_array, T_array, cells_rad, C_in_RK, T_in_RK4[RKt], T_wall_RK4[RKt])
-    
+                field_T_EX, field_T_EXX, field_T_IN, field_T_INN = get_neighbour_fields(C_array, T_array, cells_rad, C_in_RK, T_in_RK4[RKt], T_wall_RK4)
+                
         # Calculate flux
         C_flux_arrays[RKt], T_flux_arrays[RKt] = Euler_fluxes(D_er_RK, field_v_RK, field_p,
             dz_mgrid, dr_mgrid, cell_V, r_centers_mgrid,
@@ -2284,11 +2426,14 @@ def RK4_fluxes(dt_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_cente
         # Calculate new radial diffusion coefficient
         D_er_RK = radial_diffusion_coefficient(field_v_RK, d_cat_part, d_tube)
 
+        # Calculate wall temperature profile
+        T_wall_RK4 = gv.Twall_func.dynamic(times_RK4[RKt], dt_RK4[RKt], T_wall_RK4, C_array[:,0,:], T_array[0,:], field_v_RK)
+        
         # Get fields of neighbouring cells                 
         field_C_W, field_C_WW, field_C_E, \
             field_C_EX, field_C_EXX, field_C_IN, field_C_INN, \
             field_T_W, field_T_WW, field_T_E, \
-                field_T_EX, field_T_EXX, field_T_IN, field_T_INN = get_neighbour_fields(C_array, T_array, cells_rad, C_in_RK, T_in_RK4[RKt], T_wall_RK4[RKt])
+                field_T_EX, field_T_EXX, field_T_IN, field_T_INN = get_neighbour_fields(C_array, T_array, cells_rad, C_in_RK, T_in_RK4[RKt], T_wall_RK4)
     
         # Calculate fluxes
         C_flux_arrays[RKt], T_flux_arrays[RKt] = Euler_fluxes(D_er_RK, field_v_RK, field_p,
@@ -2305,8 +2450,6 @@ def RK4_fluxes(dt_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_cente
     
 
     return Ci_fluxes, T_fluxes
-
-
 
 
 
@@ -2426,11 +2569,11 @@ def Euler_fluxes(D_er, v_n, p_P,
     # Specific heat capacity of every specie
     Cp_i = Cp_species(T_P)
     # Mixture specific heat capacity
-    Cp_mix = Cp_mixture(X_i, Cp_i, T_P) 
+    Cp_mix = Cp_mixture(X_i, Cp_i) 
     # Density of a mixture 
     rho_mix_mol = mol_density_mixture(Ci_P) 
     # Effective radial thermal conductivity
-    Lambda_er, h_t = radial_thermal_conductivity(v_n, rho_mix_mol, Cp_mix, d_cat_part, X_i, T_P, epsilon, N, shape='sphere')    
+    Lambda_er, h_t = radial_thermal_conductivity(v_n, rho_mix_mol, Cp_mix, d_cat_part, X_i, T_P, epsilon, N, Ci_P[:,0,:], shape='sphere')    
     
     # Heat advection term
     heat_coeff = v_n  * Cp_mix * rho_mix_mol
@@ -2537,7 +2680,7 @@ def steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_w
             field_T_EX, field_T_EXX, field_T_IN, field_T_INN = get_neighbour_fields(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wall_n)
     
     # Get first fluxes
-    C_fluxes, T_fluxes = steady_Euler_fluxes(field_D_er, field_v, field_p,
+    C_fluxes, T_fluxes = Euler_fluxes(field_D_er, field_v, field_p,
         dz_mgrid, dr_mgrid, cell_V, r_centers_mgrid,
         field_Ci_n, field_C_W, field_C_WW, field_C_IN, field_C_INN, field_C_EX, field_C_EXX, 
         field_T_n, field_T_W, field_T_WW, field_T_IN, field_T_INN, field_T_EX, field_T_EXX,
@@ -2557,7 +2700,7 @@ def steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_w
 
     
     # Get another set of fluxes at n+1
-    C_fluxes_n1, T_fluxes_n1 = steady_Euler_fluxes(field_D_er, field_v, field_p,
+    C_fluxes_n1, T_fluxes_n1 = Euler_fluxes(field_D_er, field_v, field_p,
         dz_mgrid, dr_mgrid, cell_V, r_centers_mgrid,
         field_Ci_n1, field_C_W, field_C_WW, field_C_IN, field_C_INN, field_C_EX, field_C_EXX, 
         field_T_n1, field_T_W, field_T_WW, field_T_IN, field_T_INN, field_T_EX, field_T_EXX,
@@ -2574,147 +2717,647 @@ def steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_w
 
 
 
-def steady_Euler_fluxes(D_er, v_n, p_P,
-        cell_dz, cell_dr, cell_V, cell_r_center,
-        Ci_P, Ci_W, Ci_WW, Ci_IN, Ci_INN, Ci_EX, Ci_EXX,
-        T_P, T_W, T_WW, T_IN, T_INN, T_EX, T_EXX,
-        bulk_rho_c, BET_cat_P, d_cat_part, cat_cp, cat_shape,
-        epsilon, N, adv_scheme, diff_scheme, pi_limit, nu_i, nu_j):
+# def steady_Euler_fluxes(D_er, v_n, p_P,
+#         cell_dz, cell_dr, cell_V, cell_r_center,
+#         Ci_P, Ci_W, Ci_WW, Ci_IN, Ci_INN, Ci_EX, Ci_EXX,
+#         T_P, T_W, T_WW, T_IN, T_INN, T_EX, T_EXX,
+#         bulk_rho_c, BET_cat_P, d_cat_part, cat_cp, cat_shape,
+#         epsilon, N, adv_scheme, diff_scheme, pi_limit, nu_i, nu_j):
+#     """
+#     Calculates the EULER FLUXES OF CONCENTRATION AND TEMPERATURE FIELDS (dCi, dT for dCi/dt, dT/dt)
+#     This function differs from unsteady Euler fluxed because it doesn't account for thermal innertia of catalyst mass. 
+
+#     Parameters
+#     ----------
+#     D_er : 1D array
+#         [m2 s-1] Effective radial diffusion coefficient in packed bed
+#     v_n : 1D array
+#         [m s-] Superficial flow velocity
+#     p_P : 1D array
+#         [Pa] Pressure at cell P
+#     cell_dz : 2D array
+#         [m] Cell axial size
+#     cell_dr : 2D array
+#         [m] Cell radial size
+#     cell_V : 2D array
+#         [m3] Cell volume
+#     cell_r_center : 2D array
+#         [m] Cell center radial position
+#     Ci_P : 3D array
+#         [J mol-1 K-1] Specie concentrations at point P
+#     Ci_W : 3D array
+#         [J mol-1 K-1] Specie concentrations at neighbouring point W (west)
+#     Ci_WW : 3D array
+#         [J mol-1 K-1] Specie concentrations at neighbouring point WW (west west)
+#     Ci_IN : 3D array
+#         [J mol-1 K-1] Specie concentrations at neighbouring point IN (internal)
+#     Ci_INN : 3D array
+#         [J mol-1 K-1] Specie concentrations at neighbouring point INN (internal internal)
+#     Ci_EX : 3D array
+#         [J mol-1 K-1] Specie concentrations at neighbouring point EX (external)
+#     Ci_EXX : 3D array
+#         [J mol-1 K-1] Specie concentrations at neighbouring point EXX (external external)
+#     T_P : 2D array
+#         [C] Temperature at point P
+#     T_W : 2D array
+#         [C] Temperature at neighbouring point W (west)
+#     T_WW : 2D array
+#         [C] Temperature at neighbouring point WW (west west)
+#     T_IN : 2D array
+#         [C] Temperature at neighbouring point IN (internal)
+#     T_INN : 2D array
+#         [C] Temperature at neighbouring point INN (internal internal)
+#     T_EX : 2D array
+#         [C] Temperature at neighbouring point EX
+#     T_EXX : 2D array
+#         [C] Temperature at neighbouring point EXX
+#     bulk_rho_c : float
+#         [kg m-3] Bulk catalyst density
+#     BET_cat_P : 2D array
+#         [m2 kg-1] Surface area of fresh catalyst per mass
+#     d_cat_part : float
+#         [m] Catalyst particle diameter
+#     cat_cp : float
+#         [J kg-1 K-1] Catalyst specific heat capacity        
+#     cat_shape : string
+#         [sphere / cylinder] Shape of catalyst particles
+#     epsilon : float
+#         [-] Packed bed porosity
+#     N : float
+#         [-] Aspect ratio
+#     adv_scheme : int
+#         Choice of advection scheme
+#     diff_scheme : int
+#         Choice of diffusion scheme
+#     pi_limit : float
+#         [bar] Partial pressure lower limit for reaction rate 
+#     nu_i : array
+#         [-] Effectivness factor for production / consumption of species i
+#     nu_j : array
+#         [-] Effectiveness factor for reaction j
+        
+
+#     Returns
+#     -------
+#     mass_flux : 3D array 
+#         [-] Fluxes (dCi / dt) in specie concentration fields
+#     heat_flux : 2D array
+#         [-] Flux (dT / dt) in temperature (heat) field 
+
+#     """
+    
+#     # --- Mass transport 
+#     # Mass advection term
+#     mass_adv_i = advection_flux(Ci_P, Ci_W, Ci_WW, cell_dz, v_n, adv_scheme)
+    
+#     # Mass diffusion term
+#     mass_diff_i = diffusion_flux(Ci_P, Ci_EX, Ci_EXX, Ci_IN, Ci_INN, cell_dr, cell_r_center, D_er, diff_scheme)
+    
+#     # Mass source term 
+#     # Mole fractions of species
+#     X_i = concentration_to_mole_fraction(Ci_P) 
+#     # partial pressure
+#     p_i = partial_pressure(p_P, X_i)
+#     # Reaction rates
+#     r_R, r_D, r_W = reaction_rates(p_i, T_P, pi_limit)
+#     # Formation rates
+#     r_i = formation_rates(r_R, r_D, r_W, BET_cat_P)
+#     r_i = np.asarray(r_i) # Convert this to np array
+#     # Mass source / sink
+#     mass_source_i = (nu_i * bulk_rho_c * r_i)
+    
+#     mass_flux = (mass_adv_i + mass_diff_i + mass_source_i) /epsilon
+    
+#     # --- Heat transport 
+#     # Specific heat capacity of every specie
+#     Cp_i = Cp_species(T_P) 
+#     # Mixture specific heat capacity
+#     Cp_mix = Cp_mixture(X_i, Cp_i) 
+#     # Density of a mixture 
+#     rho_mix_mol = mol_density_mixture(Ci_P) 
+#     # Effective radial thermal conductivity
+#     Lambda_er, h_t = radial_thermal_conductivity(v_n, rho_mix_mol, Cp_mix, d_cat_part, X_i, T_P, epsilon, N, Ci_P[:,0,:], shape='sphere')    
+    
+#     # Heat advection term
+#     heat_coeff = v_n  * Cp_mix * rho_mix_mol
+#     heat_adv_i = advection_flux(T_P, T_W, T_WW, cell_dz, heat_coeff, adv_scheme)
+
+#     # Heat diffusion term
+#     heat_diff_i = heat_diffusion_flux(T_P, T_EX, T_EXX, T_IN, T_INN, cell_dr, cell_r_center, Lambda_er, h_t, diff_scheme)
+                        
+#     # Heat source / sink from individual reactions
+#     source_R = nu_j * r_R * (- enthalpy_R(Cp_i, T_P) )
+#     source_D = nu_j * r_D * (- enthalpy_D(Cp_i, T_P) )
+#     source_W = nu_j * r_W * (- enthalpy_W(Cp_i, T_P) )
+
+#     # Total heat source/sink   
+#     heat_source_i = (source_R + source_D + source_W) * bulk_rho_c *  BET_cat_P  
+    
+#     # Heat flux for time stepping (dT / dt)
+#     heat_flux = (heat_adv_i + heat_diff_i + heat_source_i) / (epsilon * rho_mix_mol * Cp_mix + bulk_rho_c * cat_cp)# (Cp_mix * rho_mix_mol) 
+
+
+#     return mass_flux, heat_flux
+
+
+
+
+
+
+
+# -------------------------------------------------
+# ------ WALL TEMPERATURE and REACTOR HEATING FUNCTIONS
+# -------------------------------------------------
+
+
+def T_wall_second_derivative(T_P, dz):
     """
-    Calculates the EULER FLUXES OF CONCENTRATION AND TEMPERATURE FIELDS (dCi, dT for dCi/dt, dT/dt)
-    This function differs from unsteady Euler fluxed because it doesn't account for thermal innertia of catalyst mass. 
+    Calculates second derivatives of wall temperature array with 4th order central bounded difference
 
     Parameters
     ----------
-    D_er : 1D array
-        [m2 s-1] Effective radial diffusion coefficient in packed bed
-    v_n : 1D array
-        [m s-] Superficial flow velocity
-    p_P : 1D array
-        [Pa] Pressure at cell P
-    cell_dz : 2D array
-        [m] Cell axial size
-    cell_dr : 2D array
-        [m] Cell radial size
-    cell_V : 2D array
-        [m3] Cell volume
-    cell_r_center : 2D array
-        [m] Cell center radial position
-    Ci_P : 3D array
-        [J mol-1 K-1] Specie concentrations at point P
-    Ci_W : 3D array
-        [J mol-1 K-1] Specie concentrations at neighbouring point W (west)
-    Ci_WW : 3D array
-        [J mol-1 K-1] Specie concentrations at neighbouring point WW (west west)
-    Ci_IN : 3D array
-        [J mol-1 K-1] Specie concentrations at neighbouring point IN (internal)
-    Ci_INN : 3D array
-        [J mol-1 K-1] Specie concentrations at neighbouring point INN (internal internal)
-    Ci_EX : 3D array
-        [J mol-1 K-1] Specie concentrations at neighbouring point EX (external)
-    Ci_EXX : 3D array
-        [J mol-1 K-1] Specie concentrations at neighbouring point EXX (external external)
-    T_P : 2D array
-        [C] Temperature at point P
-    T_W : 2D array
-        [C] Temperature at neighbouring point W (west)
-    T_WW : 2D array
-        [C] Temperature at neighbouring point WW (west west)
-    T_IN : 2D array
-        [C] Temperature at neighbouring point IN (internal)
-    T_INN : 2D array
-        [C] Temperature at neighbouring point INN (internal internal)
-    T_EX : 2D array
-        [C] Temperature at neighbouring point EX
-    T_EXX : 2D array
-        [C] Temperature at neighbouring point EXX
-    bulk_rho_c : float
-        [kg m-3] Bulk catalyst density
-    BET_cat_P : 2D array
-        [m2 kg-1] Surface area of fresh catalyst per mass
-    d_cat_part : float
-        [m] Catalyst particle diameter
-    cat_cp : float
-        [J kg-1 K-1] Catalyst specific heat capacity        
-    cat_shape : string
-        [sphere / cylinder] Shape of catalyst particles
-    epsilon : float
-        [-] Packed bed porosity
-    N : float
-        [-] Aspect ratio
-    adv_scheme : int
-        Choice of advection scheme
-    diff_scheme : int
-        Choice of diffusion scheme
-    pi_limit : float
-        [bar] Partial pressure lower limit for reaction rate 
-    nu_i : array
-        [-] Effectivness factor for production / consumption of species i
-    nu_j : array
-        [-] Effectiveness factor for reaction j
+    T_P : 1D array
+        [K] Wall temperatures
+    dz : 1D array
+        [m] Cell spacing array
+
+    Returns
+    -------
+    d2_T_wall : 1D array
+        [K m-1] Second derivative of wall temperature  
+
+    """
+    
+    # Make arrays for EE, E, W, and WW cells 
+    T_E = np.roll(T_P, -1)
+    T_E[0,-1] = T_E[0,-2] # Eastmost boundary
+    T_EE = np.roll(T_E,-1)
+    T_EE[0,-1] = T_EE[0,-2] # Eastmost boundary
+    
+    T_W = np.roll(T_P, 1)
+    T_W[0,0] = T_W[0,1] # Westmost boundary
+    T_WW = np.roll(T_W, 1)
+    T_WW[0,0] = T_WW[0,1] # Westmost boundary
+    
+    # Second derivative evaluation 2nd order
+    # d2_T_wall = (T_E - 2*T_P + T_W) / (dz**2)
+    
+    # Second derivative evaluation 4th order
+    d2_T_wall = (-T_EE + 16*T_E - 30*T_P + 16*T_W - T_WW) / (12*dz**2)
+    
+    # Special treatment for near wall cells
+    # Near inlet cells
+    # d2_T_wall[0,0] = (2*T_P[0,0] - 5*T_P[0,1] + 4*T_P[0,2] - T_P[0,3]) / (dz[0]**2) # 2o right sided FD 
+    d2_T_wall[0,0] = (T_P[0,0] - 2*T_P[0,1] + T_P[0,2]) / (dz[0]**2) # 1o right sided FD 
+    d2_T_wall[0,1] = (T_P[0,0] - 2*T_P[0,1] + T_P[0,2]) / (dz[1]**2) # 2o central difference for second cell
+    # Near outlet cells 
+    # d2_T_wall[0,-1] = (2*T_P[0,-1] - 5*T_P[0,-2] + 4*T_P[0,-3] - T_P[0,-4]) / (dz[-1]**2) # 2o left sided FD 
+    d2_T_wall[0,-1] = (T_P[0,-1] - 2*T_P[0,-2] + T_P[0,-3]) / (dz[-1]**2) # 1o left sided FD 
+    d2_T_wall[0,-2] = (T_P[0,-3] - 2*T_P[0,-2] + T_P[0,-1]) / (dz[-2]**2) # 2o central difference for second to last cell
+    
+    
+    return d2_T_wall
+
+
+
+
+def T_wall_first_derivative(T_P, dz):
+    """
+    Calculates first derivatives of wall temperature array with 4th order central bounded difference
+
+    Parameters
+    ----------
+    T_P : 1D array
+        [K] Wall temperatures
+    dz : 1D array
+        [m] Cell spacing array
+
+    Returns
+    -------
+    d_T_wall : 1D array
+        [K m-1] Second derivative of wall temperature  
+
+    """
+    
+    # Make arrays for EE, E, W, and WW cells 
+    T_E = np.roll(T_P, -1)
+    T_E[0,-1] = T_E[0,-2] # Eastmost boundary
+    T_EE = np.roll(T_E,-1)
+    T_EE[0,-1] = T_EE[0,-2] # Eastmost boundary
+    
+    T_W = np.roll(T_P, 1)
+    T_W[0,0] = T_W[0,1] # Westmost boundary
+    T_WW = np.roll(T_W, 1)
+    T_WW[0,0] = T_WW[0,1] # Westmost boundary
+    
+    
+    # First derivative evaluation 2o
+    # d_T_wall = (T_E - T_W) / (2*dz)
+    
+    # First derivative evaluation 4o
+    d_T_wall = (-T_EE + 8*T_E - 8*T_W + T_WW) / (12*dz)
+    
+    # Special treatment for near wall cells
+    # Near inlet cells
+    d_T_wall[0,0] = (-3*T_P[0,0] + 4*T_P[0,1] - T_P[0,2]) / (2*dz[0]) # 2o right sided FD 
+    # d_T_wall[0,0] = (-T_P[0,0] + T_P[0,1]) / (dz[0]) # 1o right sided FD 
+    
+    d_T_wall[0,1] = (- T_P[0,0] + T_P[0,2]) / (2*dz[1]) # 2o central difference for second cell
+    
+    # Near outlet cells 
+    d_T_wall[0,-1] = (3*T_P[0,-1] - 4*T_P[0,-2] + T_P[0,-3]) / (2*dz[-1]) # 2o left sided FD 
+    # d_T_wall[0,-1] = (T_P[0,-1] - T_P[0,-2]) / (dz[-1]) # 1o left sided FD 
+    
+    d_T_wall[0,-2] = (- T_P[0,-3] + T_P[0,-1]) / (2*dz[-2]) # 2o central difference for second to last cell
+    
+    return d_T_wall
+
+
+
+def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
+    """
+    Read boundary conditions and define time dependant functions of wall temperature boundary condition
+
+    Parameters
+    ----------
+    input_json_fname : str
+        Input .json file name
+    dyn_bc : string
+        (yes / no) Use dynamic boundary conditions or not 
+    z_cell_centers : array
+        [m] Distances of axial 
+    l_tube : float
+        [m] Reactor tube length
+
+    Raises
+    ------
+    ValueError
         
 
     Returns
     -------
-    mass_flux : 3D array 
-        [-] Fluxes (dCi / dt) in specie concentration fields
-    heat_flux : 2D array
-        [-] Flux (dT / dt) in temperature (heat) field 
+    heating_choice : string
+        Chosen wall heating 
+    T_wall_func_steady : function
+        Function for steady wall temperature profile
+    T_wall_func_dynamic : function
+        Function for dynamic wall temperature profile
 
     """
     
-    # --- Mass transport 
-    # Mass advection term
-    mass_adv_i = advection_flux(Ci_P, Ci_W, Ci_WW, cell_dz, v_n, adv_scheme)
+    # Define dictionary of keys for heating options
+    heating_dict = {'temperature-profile':'temperature profile parameters',
+                   'flue-gas':'flue gas parameters',
+                   'joule':'joule heating parameters'}
     
-    # Mass diffusion term
-    mass_diff_i = diffusion_flux(Ci_P, Ci_EX, Ci_EXX, Ci_IN, Ci_INN, cell_dr, cell_r_center, D_er, diff_scheme)
     
-    # Mass source term 
-    # Mole fractions of species
-    X_i = concentration_to_mole_fraction(Ci_P) 
-    # partial pressure
-    p_i = partial_pressure(p_P, X_i)
-    # Reaction rates
-    r_R, r_D, r_W = reaction_rates(p_i, T_P, pi_limit)
-    # Formation rates
-    r_i = formation_rates(r_R, r_D, r_W, BET_cat_P)
-    r_i = np.asarray(r_i) # Convert this to np array
-    # Mass source / sink
-    mass_source_i = (nu_i * bulk_rho_c * r_i)
-    
-    mass_flux = (mass_adv_i + mass_diff_i + mass_source_i)#/epsilon
-    
-    # --- Heat transport 
-    # Specific heat capacity of every specie
-    Cp_i = Cp_species(T_P) 
-    # Mixture specific heat capacity
-    Cp_mix = Cp_mixture(X_i, Cp_i, T_P) 
-    # Density of a mixture 
-    rho_mix_mol = mol_density_mixture(Ci_P) 
-    # Effective radial thermal conductivity
-    Lambda_er, h_t = radial_thermal_conductivity(v_n, rho_mix_mol, Cp_mix, d_cat_part, X_i, T_P, epsilon, N, shape='sphere')    
-    
-    # Heat advection term
-    heat_coeff = v_n  * Cp_mix * rho_mix_mol
-    heat_adv_i = advection_flux(T_P, T_W, T_WW, cell_dz, heat_coeff, adv_scheme)
+    # Retreive the heating choice
+    heating_choice = json.load(open(input_json_fname))['reactor heating']['heating type (temperature-profile / flue-gas / joule)']
+    # Ready heating parameters for chosen 
+    steady_heating_params = json.load(open(input_json_fname))['reactor heating'][heating_dict[heating_choice.lower()]]
+    dynamic_heating_params = json.load(open(input_json_fname))['dynamic boundary conditions']['dynamic heating parameters'][heating_dict[heating_choice.lower()]]
 
-    # Heat diffusion term
-    heat_diff_i = heat_diffusion_flux(T_P, T_EX, T_EXX, T_IN, T_INN, cell_dr, cell_r_center, Lambda_er, h_t, diff_scheme)
+    # Define relative cell centers (from 0 to 1) that will be used to interpolate 
+    rel_zcell_centers = z_cell_centers / l_tube
+    
+    # See whether we use dynamic boundary conditions for t wall
+    dyn_BC = json.load(open(input_json_fname))['dynamic boundary conditions']
+    
+    # See whether we're using dynamic boundary conditions
+    condition = dyn_BC['use dynamic wall heating (yes / no)'].lower()
+    if condition not in ['yes', 'no']: 
+        raise NameError('Dynamic boundary conditions: dynamic wall heating choice not recognized')
+    
+    
+    
+    if heating_choice == 'temperature-profile':
+
+        # for steady we just need to return the pre defined profile 
+        wall_T_rel_profile = np.asarray(steady_heating_params['reactor wall temperature profile [C]'])
+        wall_T_rel_positions = np.asarray(steady_heating_params['wall temperature relative axial positions [-]'])
+
+        ax_cells = len(z_cell_centers) # Number of axial cells 
+
+        # Calculate wall temperature distribution 
+        rel_dz_half = (1 / ax_cells) / 2 # Get relative axial cell size (uniform mesh)
+        # Mesh in relative coordinates (from 0 to 1)
+        rel_mesh = np.linspace(rel_dz_half,1.-rel_dz_half,int(ax_cells)) 
+        # Get initial wall T profile
+        wall_T_profile = [np.interp(x, wall_T_rel_positions, wall_T_rel_profile) for x in rel_mesh]
+
+        # Make a function that always returns the same wall T profile        
+        def T_wall_func_steady(self, *args, **kwargs):
+            return wall_T_profile
+        
+        
+        # -- Dynamic boundary condition function 
+        if dyn_bc == 'no' or condition == 'no': # If we're not using dynamic boundary conditions entirely or if we're not using them for wall temp
+            # If dynamic 
+            def T_wall_func_dynamic(self, *args, **kwargs):
+                return wall_T_profile
+                
+        else: # else if both conditions are true
+            # Get axial relative profile
+            Tw_ax_profile = np.asarray(dynamic_heating_params['reactor wall temperature profile z relative positions'])
+            # Tuple containing times(floats) and Twall profiles at times (tuples)
+            Twall_tuple = dynamic_heating_params['reactor wall temperature profile in time (t[s], T_profile[C])']
+            # Extract np arrays from this tuple
+            Tw = np.asarray([row[1] for row in Twall_tuple])
+            time_Tw = np.asarray([row[0] for row in Twall_tuple])
+            
+            
+            if len(Tw) == 0 or len(time_Tw) == 0:
+                raise ValueError('In "dynamic boundary conditions", there are empty lists in wall temperature profiles')
+            
+            for row in Tw: 
+                if len(row) != len(Tw[0]): # Every given temp. profile should be of same length
+                    raise ValueError('In "dynamic boundary conditions", not all wall profiles are of same size!')
+            if len(Tw[0]) != len(Tw_ax_profile): # Amount of relative axial points should match amount of temp. points given in every T_wall_profile
+                raise ValueError('In "dynamic boundary conditions", length of relative axial points and T_profile do not match!')
+            if not (sorted(Tw_ax_profile) == Tw_ax_profile).all(): # Check if relative profile is given in ascending order
+                raise ValueError('In "dynamic boundary conditions", wall temperature axial relative points should be given in ascending order')
+            if not ( sorted(time_Tw) == time_Tw).all(): # Time should be given in ascending order
+                raise ValueError('In "dynamic boundary conditions", time for wall temperature should be given in ascending order')
+
+            if len(Tw) == 1: # If we defined only one profile point
+                # We don't have to do temporal interpolation here, just spatial once 
+                Tw_profile = [] # Empty array 
+                
+                for point in rel_zcell_centers:
+                    # Interpolate user given relative axial positions to mesh axial cell distribution
+                    Tw_profile.append( np.interp(point, Tw_ax_profile, Tw[0]) ) 
+                # Convert to np.array    
+                Tw_profile = np.asarray(Tw_profile)
+                # Define a function that always returns this profile 
+                def Twall_func_dynamic(self, t, *args, **kwargs):
+                    return Tw_profile
+            
+            else: # If array has more than 1 temporal point, we have to 
+                # Reshape Tw - "rotate" matrix 90 degrees 
+                # In reshaped matrix each row is evolution of temperature in time for a single point
+                Tw = np.ravel(Tw, order='F').reshape(len(Tw[0]), len(Tw)) 
+                
+                def T_wall_func_dynamic(self, t, *args, **kwargs):
+                    """
+                    Interpolates wall temperature profile in time
+        
+                    Parameters
+                    ----------
+                    t : float
+                        [s] time
+        
+                    Returns
+                    -------
+                    Tw_profile : array
+                        Wall temperature profile 
+        
+                    """
+                    
+                    # Interpolate temperature profile for time t and given relative z coordinates
+                    interp_Tw = [] # Empty list for time interpolated wall temperature profile
+                    for point in Tw:
+                        # Interpolate in time for each relative axial position
+                        interp_Tw.append( np.interp(t, time_Tw, point) )
+                     # interp_Tw profile does not match axial z cell distribution
+                    
+                    Tw_profile = [] # Empty list for Temperature profile that matches axial z cell distribution
+                    for point in rel_zcell_centers:
+                        # Interpolate user given relative axial positions to mesh axial cell distribution
+                        Tw_profile.append( np.interp(point, Tw_ax_profile, interp_Tw) ) 
+                    
+                    # Convert to numpy array
+                    Tw_profile = np.asarray(Tw_profile)
+                    
+                    return Tw_profile
+        
+        
+        
+    elif heating_choice == 'joule':
+        # For joule we need to iterate depending on h_wall T_wall, and T_near_wall
+        # In dynamic there is also a t variable which changes I
+        
+        # Get material properties
+        material_props = json.load(open(input_json_fname))['reactor parameters']
+        d_tube_jh = material_props['single tube diameter [m]']
+        s_tube_jh = material_props['single tube wall thickness [m]']
+        rho_tube_jh = material_props['material density [kg m-3]']
+        k_tube_jh = material_props['material thermal conductivity [W m-1 K-1]']
+        cp_tube_jh = material_props['material specific heat capacity [J kg-1 K-1]']
+        
+        # Joule heating specifics
+        I_tube_jh = steady_heating_params['current through single tube [A]']
+        rho_e_tube_jh = steady_heating_params['tube material electrical resistivity [ohm m]']
+        
+        # The current formulas are derived for total wall thickness across diameter so below we use this s2
+        s2_tube_jh = s_tube_jh*2
+        
+        
+        # Axial cell spacing array
+        dz = np.ones(len(z_cell_centers)) * (l_tube / len(z_cell_centers)) 
+        
+        def T_wall_func_steady(self, relax, T_wall, C_near_wall, T_near_wall, u_s, *args, **kwargs): 
+            """
+            Calculates wall temperature from Joule heating
+
+            Parameters
+            ----------
+            relax : float
+                [-] Underrelaxation factor
+            T_wall : 1D array
+                [C] Current wall temperature profile
+            C_near_wall : 2D array
+                [mol m-3] Current specie sconcentration array of internal cells adjacent to the wall
+            T_near_wall : 1D array
+                [C] Current temperature array of internal cells adjacent to the wall
+            u_s : 1D array
+                [m s-1] Superficial velocity
+
+            Returns
+            -------
+            wall_T_profile : 1D array
+                [C] Newly calculated wall temperature profile
+
+            """
+            
+            C_near_wall = np.rot90(np.reshape(C_near_wall, C_near_wall.shape + (1,)), axes=(1,2))
+            T_wall = np.rot90(np.reshape(T_wall, T_wall.shape+(1,)))
+            T_near_wall = np.rot90(np.reshape(T_near_wall, T_near_wall.shape+(1,)))
+
+            
+            # First get film transfer coefficient
+            ht = heat_transfer_coeff_tube(u_s, self.d_p, T_near_wall, C_near_wall, self.epsilon)
+            
+            d2_T_wall = T_wall_second_derivative(T_wall, dz) # Second derivative along z [K m-2]
+            Q_ax = d2_T_wall * k_tube_jh
+            
+            # Heat radially transferred to the reactor [kg s-3 m-1]
+            Q_rad = ( (4 * d_tube_jh * ht) / (s2_tube_jh*(2*d_tube_jh + s2_tube_jh)) ) * (T_wall - T_near_wall)
+            
+            # Heat generated by Joule effect [kg s-3 m-1]
+            # Total heat generated in the reactor 
+            total_Q_gen = (16 * rho_e_tube_jh * I_tube_jh**2) / ( np.pi**2 * s2_tube_jh**2 * (2*d_tube_jh + s2_tube_jh)**2)
+            # Divide total generated heat by number of wall cells
+            Q_gen = (total_Q_gen/T_wall.shape[1])
+            
+            # Total delta T 
+            dT = (Q_ax + Q_gen - Q_rad) / (rho_tube_jh*cp_tube_jh)
+            
+            # Calculate new wall T profile
+            wall_T_profile = (T_wall + dT*relax).flatten()
+            
+            
+            return wall_T_profile
+        
+        
+        
+        # -- Dynamic boundary condition function 
+        if dyn_bc == 'no' or condition == 'no': # If at least one is false, we have a steady current
+            # Make a lambda function for I that always gives the same value
+            I_in_func = lambda t : I_tube_jh
+            
+        else: # Otherwise make an interpolation function
+            # - Read values from dictionary
+            # Matrix containing times and currents
+            I_matrix = np.asarray(dynamic_heating_params['current through single tube in time (t[s], I[A])'])
+            # Extract respective arrays from the matrix
+            I_in = I_matrix[:,1]
+            time_I = I_matrix[:,0]
+            
+            # Do some checks
+            if len(I_in) == 0 or len(time_I) == 0: # If nothing in list(s) 
+                raise ValueError('In "dynamic boundary conditions", there are empty lists in joule heating profiles')
+            if len(time_I) != len(I_in): # Amount of inlet feeds points should match number of time points
+                raise ValueError('In "dynamic boundary conditions", length of I_in and T_time does not match!')
+            if not ( sorted(time_I) == time_I).all(): # Time should be given in ascending order
+                raise ValueError('In "dynamic boundary conditions", time_I should be given in ascending order')
+            
+            if len(I_in) == 1: # If one element in list 
+                I_in_func = lambda t : I_in[0] # Dont bother with interpolation, just return that value
+                
+            else: # If multiple values in list
+                    # - First check some things 
+                    if len(time_I) != len(I_in): # Amount of inlet feeds points should match number of time points
+                        raise ValueError('In "dynamic boundary conditions", length of t_WF_in and WF_in does not match!')
                         
-    # Heat source / sink from individual reactions
-    source_R = nu_j * r_R * (- enthalpy_R(Cp_i, T_P) )
-    source_D = nu_j * r_D * (- enthalpy_D(Cp_i, T_P) )
-    source_W = nu_j * r_W * (- enthalpy_W(Cp_i, T_P) )
+                    if not ( sorted(time_I) == time_I).all(): # Time should be given in ascending order
+                        raise ValueError('In "dynamic boundary conditions", t_WF_in should be given in ascending order')
+                        
+                    def I_in_func(t): 
+                        """
+                        Interpolates current through reactor tube in time
+            
+                        Parameters
+                        ----------
+                        t : float
+                            [s] time
+            
+                        Returns
+                        -------
+                        I_in : float
+                            [A] Electrical current through one tube 
+                        """
+                        
+                        I_tube = np.interp(t, time_I, I_in)
+                        
+                        return I_tube
+            
+            
+        def T_wall_func_dynamic(self, t, dt, T_wall, C_near_wall, T_near_wall, u_s, *args, **kwargs):
+            """
+            Calculates wall temperature from Joule heating
 
-    # Total heat source/sink   
-    heat_source_i = (source_R + source_D + source_W) * bulk_rho_c *  BET_cat_P  
+            Parameters
+            ----------
+            t : float
+                [s] Time
+            dt : float
+                [s] Timestep size
+            T_wall : 1D array
+                [C] Current wall temperature profile
+            C_near_wall : 2D array
+                [mol m-3] Current specie sconcentration array of internal cells adjacent to the wall
+            T_near_wall : 1D array
+                [C] Current temperature array of internal cells adjacent to the wall
+            u_s : 1D array
+                [m s-1] Superficial velocity
+
+            Returns
+            -------
+            wall_T_profile : 1D array
+                [C] Newly calculated wall temperature profile
+
+            """
+            C_near_wall = np.rot90(np.reshape(C_near_wall, C_near_wall.shape + (1,)), axes=(1,2))
+            T_wall = np.rot90(np.reshape(T_wall, T_wall.shape+(1,)))
+            T_near_wall = np.rot90(np.reshape(T_near_wall, T_near_wall.shape+(1,)))
+            
+            # # Get current at time t
+            I_tube_t = I_in_func(t)
+            
+            # # First get film transfer coefficient
+            ht = heat_transfer_coeff_tube(u_s, self.d_p, T_near_wall, C_near_wall, self.epsilon)
+            
+            
+            # Get heat transfer due to axial diffusion along the reactor 
+            d2_T_wall = T_wall_second_derivative(T_wall, dz) # Second derivative along z [K m-2]
+            Q_ax =  d2_T_wall * k_tube_jh # 
+            
+            # Heat radially transferred to the reactor [kg s-3 m-1]
+            Q_rad = ( (4 * d_tube_jh * ht) / (s2_tube_jh*(2*d_tube_jh + s2_tube_jh)) ) * (T_wall - T_near_wall)
+            
+            # Heat generated by Joule effect [kg s-3 m-1]
+            total_Q_gen = (16 * rho_e_tube_jh * I_tube_t**2) / ( np.pi**2 * s2_tube_jh**2 * (2*d_tube_jh + s2_tube_jh)**2)
+            # Divide total generated heat by number of wall cells
+            Q_gen = (total_Q_gen/T_wall.shape[1])
+            
+            # Sum up heat fluxes and divide by tube density and cp to get dT_wall / dt
+            dT = (Q_ax - Q_rad + Q_gen) / (rho_tube_jh * cp_tube_jh)
+            
+            # Calculate new wall T profile
+            wall_T_profile = (T_wall + dT*dt).flatten()
+            
+            
+            return wall_T_profile
+        
+        
+    elif heating_choice == 'flue-gas': 
+         pass # !!!
+         
+         
+         
+
+    class Twall(): # Create an empty class that will contain methods for calculating Twall
+        pass 
     
-    # Heat flux for time stepping (dT / dt)
-    heat_flux = (heat_adv_i + heat_diff_i + heat_source_i) / (Cp_mix * rho_mix_mol) 
+    # Add defined steady and dynamic functions as methods to Twall class
+    Twall.steady = T_wall_func_steady
+    Twall.dynamic = T_wall_func_dynamic
+    
+    # Define a class instance within global variables module
+    gv.Twall_func = Twall()
+    
+    
+    # Define additional functions in class for output file writing
+    if heating_choice == 'joule':
+        def I_func(self, t):
+            I = I_in_func(t)
+            return I
+        Twall.I_func = I_func
+    else: 
+        Twall.I_func = lambda self, t : 'n/a'
+    
+    
+    
+    return heating_choice
 
 
-    return mass_flux, heat_flux
+
+
+
+
+
+
+
 
 
 

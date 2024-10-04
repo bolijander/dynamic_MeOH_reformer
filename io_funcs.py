@@ -95,6 +95,11 @@ def simulation_inputs(input_json_fname):
     tube_l = float(reactor['single tube length [m]'])
     tube_d = float(reactor['single tube diameter [m]'])
     
+    tube_s = float(reactor['single tube wall thickness [m]'])
+    tube_rho = float(reactor['material density [kg m-3]'])
+    tube_h = float(reactor['material thermal conductivity [W m-1 K-1]'])
+    tube_cp = float(reactor['material specific heat capacity [J kg-1 K-1]'])
+    
     
     # --- Numerical parameters
     ax_cells = int(numerics['number of axial cells [-]'])
@@ -123,15 +128,6 @@ def simulation_inputs(input_json_fname):
     
     inlet_gas_T = float(field['inlet gas temperature [C]'])
     init_reactor_T = float(field['initial reactor temperature [C]'])
-    wall_T_rel_profile = np.asarray(field['reactor wall temperature profile [C]'])
-    wall_T_rel_positions = np.asarray(field['wall temperature relative axial positions [-]'])
-    
-    # Calculate wall temperature distribution 
-    rel_dz_half = (1 / ax_cells) / 2 # Get relative axial cell size (uniform mesh)
-    # Mesh in relative coordinates (from 0 to 1)
-    rel_mesh = np.linspace(rel_dz_half,1.-rel_dz_half,int(ax_cells)) 
-    # Get initial wall T profile
-    wall_T_profile = [np.interp(x, wall_T_rel_positions, wall_T_rel_profile) for x in rel_mesh]
     
     flow_rate = str(field['flow rate given with (WF / WHSV)']).upper()
     if flow_rate != 'WF' and flow_rate != 'WHSV':
@@ -303,9 +299,9 @@ def simulation_inputs(input_json_fname):
             print('Input file saving incorrectly defined (save input files), saving it anyways...')
             
     return_list = [cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bulk, cat_composition, \
-                   n_tubes, tube_l, tube_d,\
+                   n_tubes, tube_l, tube_d, tube_s, tube_rho, tube_h, tube_cp,\
                    ax_cells, rad_cells, adv_scheme, diff_scheme, CFL, partP_limit, Ci_limit,\
-                   SC_ratio, p_ref, p_set_pos, inlet_gas_T, init_reactor_T, wall_T_profile, W_F,\
+                   SC_ratio, p_ref, p_set_pos, inlet_gas_T, init_reactor_T, W_F,\
                    sim_type, max_iter, convergence, relax, dt, dur_time, dyn_bc, cont_sim, cont_data_dir_path,\
                    s_dir_name, s_only_terminal, steady_save_every, dyn_save_every, dynsim_converge_first, dynsim_cont_convergence,\
                    steady_write_every, dyn_write_every, save_last_jsons, s_timestamp, s_json_out, s_log, s_files_in]
@@ -344,31 +340,45 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
     colw = int(colw/2)
 
 
+    # ----- Wall heating options
+    # This one gets special treatment because it has many variables    
+    wall_heating_condition = json.load(open(input_json_fname))['dynamic boundary conditions']['use dynamic wall heating (yes / no)'].lower()
+    
+    if wall_heating_condition == 'yes':
+        
+        bc_name_dict = {'temperature-profile':'Wall temperature profile',
+                       'flue-gas':'Flue gas',
+                       'joule':'Current through tube wall'}
+        
+        
+        # Read what kind of heating we're using
+        heating_choice = json.load(open(input_json_fname))['reactor heating']['heating type (temperature-profile / flue-gas / joule)'].lower()
 
+        print('Dynamic wall heating with {0} used'.format(bc_name_dict[heating_choice].upper()))    
+        print('Check input file for details')
+        print('\n')
+
+    # ----- Rest of boundary conditions
     # Read boundary conditions from file 
     dyn_BC = json.load(open(input_json_fname))['dynamic boundary conditions']
     yn_list = ['yes', 'no'] # List of yes no choices
 
     # List of parameters to read from dynamic boundary condition dictionary
     read_list = [ 
-        'use dynamic wall temperature profile (yes / no)', 
         'use dynamic inlet temperature (yes / no)',
         'use dynamic inlet mass flow (yes / no)',
         'use dynamic pressure (yes / no)'
         ]
 
-
     bc_name_list = [
-        'Wall temperature profile',
         'Inlet gas temperature',
         'Inlet mass flow',
         'Pressure at {0}'.format(p_ref_pos.upper())
-        ]
+            ]
 
-    bc_units = ['[C]', '[C]', '[kg s mol-1]', '[bar]']
+    bc_units = ['[C]', '[kg s mol-1]', '[bar]']
 
     value_keys = [
-        'reactor wall temperature profile in time (t[s], T_profile[C])',
         'inlet gas temperature in time (t[s], T_in[C])',
         'inlet mass flow in time (t[s], W_cat/F_CH3OH[kg s mol-1])',
         'pressure in time (t[s], p[bar])'
@@ -382,20 +392,13 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
             raise NameError('Choice in "dynamic boundary conditions" not recognized for: "{0}"'.format(read_list[pos]))
             
         if condition == 'yes':
-            if bc_name_list[pos] != 'Wall temperature profile':
-                array = np.asarray(dyn_BC[value_keys[pos]])
-                times = array[:,0]
-                values = array[:,1]
-                print('{0}:'.format(bc_name_list[pos]))
+            array = np.asarray(dyn_BC[value_keys[pos]])
+            times = array[:,0]
+            values = array[:,1]
+            print('{0}:'.format(bc_name_list[pos]))
                 
-            else: 
-                Twall_tuple = dyn_BC[value_keys[pos]]
-                values = np.asarray([row[1] for row in Twall_tuple])
-                times = np.asarray([row[0] for row in Twall_tuple])
-                rp_coords = np.asarray(dyn_BC['reactor wall temperature profile z relative positions'])
-                print('{0}: \n(relative wall profile positions: {1})'.format(bc_name_list[pos], rp_coords))
                 
-            print(('Time [s]').ljust(int(colw)) + 'value/profile {0}'.format(bc_units[pos]))        
+            print(('Time [s]').ljust(int(colw)) + 'value {0}'.format(bc_units[pos]))        
         
             for i in range(len(times)):
                 print( ('\t{0}'.format(times[i])).ljust(colw) + '{0}'.format(values[i]) )
@@ -406,7 +409,7 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
 
 
 
-def read_and_set_BCs(input_json_fname,dyn_bc, Tw_in_const, T_in_const, WF_in_const, p_ref_const, z_cell_centers, l_tube):
+def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_const):
     """
     Read boundary conditions and define time dependant functions of boundary conditions 
 
@@ -416,18 +419,12 @@ def read_and_set_BCs(input_json_fname,dyn_bc, Tw_in_const, T_in_const, WF_in_con
         Input .json file name
     dyn_bc : string
         (yes / no) Use dynamic boundary conditions or not 
-    Tw_const : arrray
-        [T] .json defined constant wall temperature profile
     Tw_in_const : float
         [T] .json defined constant inlet gas temperature 
     WF_in_const : float
         [kg s mol-1] Constant inlet methanol molar flow rate 
     p_ref_const : float
         [Pa] Constant reference pressure 
-    z_cell_centers : array
-        [m] Distances of axial 
-    l_tube : float
-        [m] Reactor tube length
 
     Raises
     ------
@@ -436,18 +433,12 @@ def read_and_set_BCs(input_json_fname,dyn_bc, Tw_in_const, T_in_const, WF_in_con
 
     Returns
     -------
-    T_wall_func, T_in_func, WF_in_func, p_in_func : functions
+    T_in_func, WF_in_func, p_in_func : functions
         Interpolation functions for wall temperature profile, inlet gas temperature, inlet methanol feed, inlet gas pressure
 
     """
-    # Define relative cell centers (from 0 to 1) that will be used to interpolate 
-    rel_zcell_centers = z_cell_centers / l_tube
     
     if dyn_bc == 'no': # If not using dynamic BCs, just set all functions to return a steady value
-        
-        # --- Wall temperature profile function
-        # Make a function that just returns the set temperature from .json
-        T_wall_func = lambda t : Tw_in_const
         
         # --- Inlet temperature function
         T_in_func = lambda t : T_in_const # Return from .json
@@ -464,99 +455,6 @@ def read_and_set_BCs(input_json_fname,dyn_bc, Tw_in_const, T_in_const, WF_in_con
         # Read boundary conditions from file 
         dyn_BC = json.load(open(input_json_fname))['dynamic boundary conditions']
         yn_list = ['yes', 'no'] # List of yes no choices
-        
-        
-        
-        
-        # --- Wall temperature time profile
-        condition = dyn_BC['use dynamic wall temperature profile (yes / no)'].lower()
-        if condition not in yn_list: 
-            raise NameError('Dynamic boundary conditions: dynamic wall temperature choice not recognized')
-        
-        
-        if condition == 'no': # If we're not using this dynamic BC
-            # Make a function that just returns the set temperature from .json
-            T_wall_func = lambda t : Tw_in_const
-            
-        else: 
-            # - read values from dictionary
-            # Get axial relative profile
-            Tw_ax_profile = np.asarray(dyn_BC['reactor wall temperature profile z relative positions'])
-            # Tuple containing times(floats) and Twall profiles at times (tuples)
-            Twall_tuple = dyn_BC['reactor wall temperature profile in time (t[s], T_profile[C])']
-            # Extract np arrays from this tuple
-            Tw = np.asarray([row[1] for row in Twall_tuple])
-            time_Tw = np.asarray([row[0] for row in Twall_tuple])
-            
-            
-            if len(Tw) == 0 or len(time_Tw) == 0:
-                raise ValueError('In "dynamic boundary conditions", there are empty lists in wall temperature profiles')
-            
-            for row in Tw: 
-                if len(row) != len(Tw[0]): # Every given temp. profile should be of same length
-                    raise ValueError('In "dynamic boundary conditions", not all wall profiles are of same size!')
-            if len(Tw[0]) != len(Tw_ax_profile): # Amount of relative axial points should match amount of temp. points given in every T_wall_profile
-                raise ValueError('In "dynamic boundary conditions", length of relative axial points and T_profile do not match!')
-            if not (sorted(Tw_ax_profile) == Tw_ax_profile).all(): # Check if relative profile is given in ascending order
-                raise ValueError('In "dynamic boundary conditions", wall temperature axial relative points should be given in ascending order')
-            if not ( sorted(time_Tw) == time_Tw).all(): # Time should be given in ascending order
-                raise ValueError('In "dynamic boundary conditions", time for wall temperature should be given in ascending order')
-
-            
-        
-            if len(Tw) == 1: # If we defined only one profile point
-                # We don't have to do temporal interpolation here, just spatial once 
-                Tw_profile = [] # Empty array 
-                
-                for point in rel_zcell_centers:
-                    # Interpolate user given relative axial positions to mesh axial cell distribution
-                    Tw_profile.append( np.interp(point, Tw_ax_profile, Tw[0]) ) 
-                # Convert to np.array    
-                Tw_profile = np.asarray(Tw_profile)
-                # Define a function that always returns this profile 
-                T_wall_func = lambda t : Tw_profile
-            
-            else: # If array has more than 1 temporal point, we have to 
-                # Reshape Tw - "rotate" matrix 90 degrees 
-                # In reshaped matrix each row is evolution of temperature in time for a single point
-                Tw = np.ravel(Tw, order='F').reshape(len(Tw[0]), len(Tw)) 
-                
-                def T_wall_func(t):
-                    """
-                    Interpolates wall temperature profile in time
-        
-                    Parameters
-                    ----------
-                    t : float
-                        [s] time
-        
-                    Returns
-                    -------
-                    Tw_profile : array
-                        Wall temperature profile 
-        
-                    """
-                    
-                    # Interpolate temperature profile for time t and given relative z coordinates
-                    interp_Tw = [] # Empty list for time interpolated wall temperature profile
-                    for point in Tw:
-                        # Interpolate in time for each relative axial position
-                        interp_Tw.append( np.interp(t, time_Tw, point) )
-                     # interp_Tw profile does not match axial z cell distribution
-                    
-                    Tw_profile = [] # Empty list for Temperature profile that matches axial z cell distribution
-                    for point in rel_zcell_centers:
-                        # Interpolate user given relative axial positions to mesh axial cell distribution
-                        Tw_profile.append( np.interp(point, Tw_ax_profile, interp_Tw) ) 
-                    
-                    # Convert to numpy array
-                    Tw_profile = np.asarray(Tw_profile)
-                    
-                    return Tw_profile
-        
-        
-        
-        
         
         
         # --- Inlet temperature
@@ -720,7 +618,7 @@ def read_and_set_BCs(input_json_fname,dyn_bc, Tw_in_const, T_in_const, WF_in_con
                         return p_reference
 
 
-    return T_wall_func, T_in_func, WF_in_func, p_ref_func
+    return T_in_func, WF_in_func, p_ref_func
 
 
 
@@ -809,9 +707,11 @@ def read_cont_sim_data(cont_data_dir_path):
     field_v = np.asarray(t_file['v'])
     field_BET = np.asarray(t_file['BET'])
     
+    # Wall temperature
+    wall_temp = np.asarray(t_file['T wall'])
     
     # --- Put all variables into a nice list
-    return_list = [t, field_Ci_n, field_T, field_p, field_v, field_BET,\
+    return_list = [t, field_Ci_n, field_T, field_p, field_v, field_BET, wall_temp,\
                    SC_ratio, n_tubes, l_tube, d_tube, N, epsilon, cells_ax, cells_rad,\
                    cat_shape, cat_dimensions, rho_cat, rho_cat_bulk, cat_composition, cat_cp, fresh_cat_BET_area]
     
