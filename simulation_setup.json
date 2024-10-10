@@ -15,7 +15,7 @@
 
 
 "numerical parameters":{
-	"number of axial cells [-]": 130,
+	"number of axial cells [-]": 50,
 	"number of radial cells [-]": 20,
 	
 	"advection discretization scheme (upwind_1o / upwind_2o)" : "upwind_2o",
@@ -30,7 +30,7 @@
 
 "reactor parameters":{
 	"total number of tubes in the reactor [-]" : 1,
-	"single tube length [m]": 1,
+	"single tube length [m]": 0.5,
 	"single tube diameter [m]": 0.02,
 	
 	"single tube wall thickness [m]": 0.005,
@@ -64,7 +64,7 @@
 "field parameters":{
 	"feed steam to carbon ratio [-]": 1.5,
 
-	"reactor pressure [bar]": 5,
+	"reactor pressure [bar]": 1,
 	"position of given reactor pressure (inlet / outlet)": "inlet",
 
 	"inlet gas temperature [C]": 250,
@@ -84,9 +84,9 @@
 	"simulation type (steady / dynamic)": "steady",
 	
 	"steady simulation parameters":{
-		"maximum iterations": 1000000,
+		"maximum iterations": 10000000,
 		"convergence criteria": 1e-6,
-		"underrelaxation factor": 1e-3
+		"underrelaxation factor": 1e-7
 	},
 	
 	"dynamic simulation parameters":{
@@ -107,7 +107,7 @@
 "save file parameters":{
 	"show results only in terminal (yes / no)" : "yes",
 	
-	"new results directory name": "test1",
+	"new results directory name": "jheating_1",
 	"save simulation output .json files (yes / no)": "yes",
 	"save log (yes / no)": "no",
 	

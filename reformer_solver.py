@@ -61,7 +61,7 @@ cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bul
     n_tubes, l_tube, d_tube, s_tube, rho_tube, h_tube, cp_tube,\
     cells_ax, cells_rad, adv_scheme, diff_scheme, CFL, pi_limit, Ci_limit,\
     SC_ratio, p_ref_n, p_set_pos, T_in_n, init_T_field, WF_in_n,\
-    sim_type, max_iter, convergence, relax, dt, t_dur, dyn_bc, cont_sim, path_old_sim_data,\
+    sim_type, max_iter, convergence, relax_start, dt, t_dur, dyn_bc, cont_sim, path_old_sim_data,\
     results_dir_name, saving_only_terminal, steady_save_every, dyn_save_every, dynsim_converge_first, dynsim_cont_converg,\
     steady_write_every, dyn_write_every, keep_last_jsons, saving_timestamp, saving_json_out, saving_log, saving_files_in = io.simulation_inputs(input_json_fname)
        
@@ -350,7 +350,7 @@ if sim_type == 'steady':
     print('\n# --- Steady simulation parameters:')
     print('Maximum iterations:'.ljust(colw) +'{0}'.format(max_iter))
     print('Convergence criteria:'.ljust(colw) +'{0:.2e}'.format(convergence))
-    print('Underrelaxation factor:'.ljust(colw) +'{0:.2e}'.format(relax))
+    print('Starting underrelaxation factor:'.ljust(colw) +'{0:.2e}'.format(relax_start))
 elif sim_type == 'dynamic':
     print('\n# --- Dynamic simulation parameters:')
     print('Simulated time duration:'.ljust(colw) +'{0}'.format(t_dur))
@@ -483,6 +483,8 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
         
     write_out_json_steady(names, values, path_sim_data, t_abs, 0)
     
+    # !!! Copy relaxation factor in case we change it later
+    relax = copy.deepcopy(relax_start)
     
     # Enter a while loop, condition to drop below convergence limit
     for iteration in range(1,max_iter+1):
@@ -523,13 +525,16 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
         # Write residuals to console ticker
         counter_terminal += 1
         if counter_terminal >= steady_write_every:
-            print(('Iteration:\t{0} Residuals: \t {1:.5e}').format(str(iteration).ljust(10), residuals))
+            print(('Iteration:\t{0} Residuals: \t {1:.3e}').format(str(iteration).ljust(10), residuals))
             counter_terminal = 0
+            print('{0:.5f}-{1:.5f} \t {2:.2e}'.format(T_wall_n[0], T_wall_n[-1], relax))
         
         # Update old arrays
         field_Ci_n  = copy.deepcopy( field_Ci_n1 )
         field_T_n = copy.deepcopy( field_T_n1 )
         
+        # Update relaxation factor 
+        # relax = new_relax_factor(relax_start, relax_max, residuals, residuals_high_limit, residuals_low_limit)
         
         if residuals < convergence:
             print('\n\nConvergence criteria reached!')
@@ -548,7 +553,9 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
     # Get fields of: rates of reaction and formation
     MSR_rate, MD_rate, WGS_rate, CH3OH_rate, H2O_rate, H2_rate, CO2_rate, CO_rate = mf.get_rate_fields(field_Ci_n1, field_T_n1, field_p, field_BET_cat,
                                                                                                 pi_limit)
-    
+    # Get Wall temperature profile
+    T_wall_n = gv.Twall_func.steady(relax, T_wall_n, field_Ci_n[:,0,:], field_T_n[0,:], field_v)
+
     # Get mass flows at inlet and outlet
     m_inlet, m_outlet = mf.get_mass_flow(v_in_n, v_out_n, r_tube, C_in_n, field_Ci_n1)
     
