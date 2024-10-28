@@ -2706,7 +2706,7 @@ def steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_w
     field_Ci_n1 = field_Ci_n + C_fluxes * relax
     field_T_n1 = field_T_n + T_fluxes * relax
     
-    T_wall_n1 = gv.Twall_func.steady(relax, T_wall_n, field_Ci_n1[:,0,:], field_T_n1[0,:], field_v)
+    T_wall_n1 = gv.Twall_func.steady(T_wall_n, field_Ci_n1[:,0,:], field_T_n1[0,:], field_v)
     
     # Get fields of neighbouring cells for n1
     field_C_W, field_C_WW, field_C_E, \
@@ -3221,6 +3221,8 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
         # The current formulas are derived for total wall thickness across diameter so below we use this s2
         s2_tube_jh = s_tube_jh*2
         
+        # underrelaxation factor specifically for reactor tube wall
+        wall_relax = json.load(open(input_json_fname))['simulation parameters']['steady simulation parameters']['wall underrelaxation factor']
         
         # Axial cell spacing array
         n_cells = len(z_cell_centers) # Number of cells
@@ -3235,7 +3237,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
         # dV_tube_cell = A_cs_tube * dz
         
         
-        def T_wall_func_steady(self, relax, T_wall, C_near_wall, T_near_wall, u_s, *args, **kwargs): 
+        def T_wall_func_steady(self, T_wall, C_near_wall, T_near_wall, u_s, *args, **kwargs): 
             """
             Calculates wall temperature from Joule heating
 
@@ -3281,8 +3283,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
             
             # Calculate new wall T profile
             wall_T_profile = (T_near_wall + dT).flatten()
-            new_T_wall = (wall_T_profile*relax + T_wall*(1-relax)).flatten()
-            
+            new_T_wall = (wall_T_profile*wall_relax + T_wall*(1-wall_relax)).flatten()
             
             return new_T_wall
         

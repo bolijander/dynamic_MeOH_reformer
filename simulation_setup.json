@@ -86,7 +86,8 @@
 	"steady simulation parameters":{
 		"maximum iterations": 10000000,
 		"convergence criteria": 1e-6,
-		"underrelaxation factor": 1e-4
+		"field underrelaxation factor": 2e-4,
+		"wall underrelaxation factor": 0.2
 	},
 	
 	"dynamic simulation parameters":{

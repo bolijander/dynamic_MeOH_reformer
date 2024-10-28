@@ -146,7 +146,7 @@ def simulation_inputs(input_json_fname):
         raise NameError('Simulation type not recongized: "{0}"'.format(sim_type))
     
     # Set all simulation variables to None, since not all of them will be defined
-    max_iter = convergence = relax = dt = dyn_bc = cont_data_dir_path = save_last_jsons = None
+    max_iter = convergence = field_relax = wall_relax = dt = dyn_bc = cont_data_dir_path = save_last_jsons = None
     dur_time = 0. # It's better for some variables to be 0
     
     # Continue simulation yes/no
@@ -211,7 +211,7 @@ def simulation_inputs(input_json_fname):
     params = operation['steady simulation parameters']
     max_iter = int(params['maximum iterations'])
     convergence = float(params['convergence criteria'])
-    relax = float(params['underrelaxation factor'])
+    field_relax = float(params['field underrelaxation factor'])
     
     # if sim_type == 'dynamic':
     params = operation['dynamic simulation parameters']
@@ -302,7 +302,7 @@ def simulation_inputs(input_json_fname):
                    n_tubes, tube_l, tube_d_in, tube_s, tube_rho, tube_h, tube_cp,\
                    ax_cells, rad_cells, adv_scheme, diff_scheme, CFL, partP_limit, Ci_limit,\
                    SC_ratio, p_ref, p_set_pos, inlet_gas_T, init_reactor_T, W_F,\
-                   sim_type, max_iter, convergence, relax, dt, dur_time, dyn_bc, cont_sim, cont_data_dir_path,\
+                   sim_type, max_iter, convergence, field_relax, dt, dur_time, dyn_bc, cont_sim, cont_data_dir_path,\
                    s_dir_name, s_only_terminal, steady_save_every, dyn_save_every, dynsim_converge_first, dynsim_cont_convergence,\
                    steady_write_every, dyn_write_every, save_last_jsons, s_timestamp, s_json_out, s_log, s_files_in]
     
