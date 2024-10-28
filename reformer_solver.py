@@ -51,14 +51,14 @@ start_time = datetime.now()
 timestamp = start_time.strftime("%y-%d-%m--%H-%M") # get timestamp for directory names
 original_stdout = sys.stdout # save original stdout
 
-# !!! s_tube, rho_tube, h_tube, cp_tube,
+
 # -------------------------------------------------
 # ------ INPUTS 
 # -------------------------------------------------
 
 # --- Read all inputs from .json file
 cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bulk, cat_composition, \
-    n_tubes, l_tube, d_tube, s_tube, rho_tube, h_tube, cp_tube,\
+    n_tubes, l_tube, d_tube_in, s_tube, rho_tube, h_tube, cp_tube,\
     cells_ax, cells_rad, adv_scheme, diff_scheme, CFL, pi_limit, Ci_limit,\
     SC_ratio, p_ref_n, p_set_pos, T_in_n, init_T_field, WF_in_n,\
     sim_type, max_iter, convergence, relax_start, dt, t_dur, dyn_bc, cont_sim, path_old_sim_data,\
@@ -81,7 +81,7 @@ cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bul
 # --- Reactor parameters
 # n_tubes   [-] Total number of tubes in the reactor
 # l_tube    [m] single tube length
-# d_tube    [m] single tube diameter
+# d_tube_in    [m] single tube inner diameter
 # s_tube    [m] reactor tube thickness
 # rho_tube  [kg m-3] tube material density
 # h_tube    [W m-1 K-1] tube material thermal conductivity
@@ -192,14 +192,15 @@ if cont_sim == 'yes':
     
     # --- Read parameters and fields from .json file
     t_abs, field_Ci_n, field_T_n, field_p, field_v, field_BET_cat, T_wall_n,\
-        SC_ratio, n_tubes, l_tube, d_tube, N, epsilon, cells_ax_old, cells_rad_old,\
+        SC_ratio, n_tubes, l_tube, d_tube_in, s_tube, rho_tube, h_tube, cp_tube, \
+        N, epsilon, cells_ax_old, cells_rad_old,\
         cat_shape, cat_dimensions, rho_cat, rho_cat_bulk, cat_composition, cat_cp, cat_BET_area = io.read_cont_sim_data(path_old_sim_data)
     
     # --- Calculate catalyst particle (equivalent) volume and diameter 
     V_cat_part, d_cat_part = mf.catalyst_dimensions(cat_shape, cat_dimensions)
         
     # --- Reactor parameters
-    r_tube = d_tube/2   # [m] Reactor tube radius
+    r_tube = d_tube_in/2   # [m] Reactor tube radius
     
     V_tube = np.pi * r_tube**2 * l_tube # [m3] internal volume of reactor tube
     W_cat = rho_cat_bulk * V_tube # [kg] Weight of catalyst in one 
@@ -239,10 +240,10 @@ elif cont_sim == 'no':
     V_cat_part, d_cat_part = mf.catalyst_dimensions(cat_shape, cat_dimensions) 
         
     # Aspect ratio - size ratio of reactor tube to catalyst particle 
-    N = mf.aspect_ratio(d_tube, d_cat_part)
+    N = mf.aspect_ratio(d_tube_in, d_cat_part)
     
     # Reactor (packed bed) porosity
-    epsilon = mf.porosity(d_tube, d_cat_part, cat_shape)
+    epsilon = mf.porosity(d_tube_in, d_cat_part, cat_shape)
     
     # Catalyst material and shipping densities - if one of them is unknown
     rho_cat, rho_cat_bulk = mf.catalyst_densities(rho_cat, rho_cat_bulk, epsilon, known_cat_density)
@@ -251,7 +252,7 @@ elif cont_sim == 'no':
     cat_cp = mf.catalyst_cp(cat_composition)
     
     # --- Reactor parameters
-    r_tube = d_tube/2   # [m] Reactor tube radius
+    r_tube = d_tube_in/2   # [m] Reactor tube radius
     
     V_tube = np.pi * r_tube**2 * l_tube # [m3] internal volume of reactor tube
     W_cat = rho_cat_bulk * V_tube # [kg] Weight of catalyst in one 
@@ -300,7 +301,7 @@ adv_index, diff_index = mf.discretization_schemes_and_ghost_cells(adv_scheme, di
 # field_Ci_n, field_T_n = mf.append_ghost_cells(field_Ci_n, field_T_n, gcells_z_in, gcells_z_out, gcells_r_wall, gcells_r_ax)
 
 # Effective radial diffusion coefficient
-field_D_er = mf.radial_diffusion_coefficient(field_v, d_cat_part, d_tube)
+field_D_er = mf.radial_diffusion_coefficient(field_v, d_cat_part, d_tube_in)
 
 # Define simulation absolute end time 
 t_end_abs = t_dur + t_abs
@@ -379,7 +380,7 @@ print('-----------------------------------------------------\n')
 print('Cat. particle (equivalent) diameter:'.ljust(colw) +'{0:.5f} [m]'.format(d_cat_part))
 print('Cat. particle (equivalent) volume:'.ljust(colw) + '{0:.3e} [m3]\n'.format(V_cat_part))
 
-print('Packed bed aspect ratio (d_tube / d_cat):'.ljust(colw) +'{0:.2f} [-]'.format(N))
+print('Packed bed aspect ratio (d_tube_in / d_cat):'.ljust(colw) +'{0:.2f} [-]'.format(N))
 print('Reactor porosity:'.ljust(colw) +'{0:.5f} [-]\n'.format(epsilon))
 
 print('Catalyst material density:'.ljust(colw) +'{0:.2f} [kg m-3]'.format(rho_cat))
@@ -418,13 +419,15 @@ counter_save = 0
 
 # --- Simulation setup file write - one time writing
 # List of name keys for file writing
-names = ['simulation type', 'simulated time', 'S/C', 'wall heating type' ,'n tubes', 'tube l', 'tube r', 'tube V' ,'aspect ratio', 'porosity',\
+names = ['simulation type', 'simulated time', 'S/C', 'wall heating type' ,'n tubes', 'tube l', 'tube r in', 'tube s', 'tube rho', 'tube h', 'tube cp',\
+         'tube V' ,'aspect ratio', 'porosity',\
          'n ax cells', 'n rad cells', 'dz', 'dy', 'cell z centers', 'cell r centers', 'cell volumes',\
          'cat shape', 'cat dimensions', 'cat particle d', 'fresh cat BET', 'cat composition', 'cat cp', 'cat rho', 'cat rho bulk', 'cat tube weight']
 
 if sim_type == 'steady' : t_dur = 'n/a' # simulation duration not applicable if we have steady simulation
 # List of fields and values for .json file writing
-values = [sim_type, t_dur, SC_ratio, wall_heating, n_tubes, l_tube, r_tube, V_tube, N, epsilon,\
+values = [sim_type, t_dur, SC_ratio, wall_heating, n_tubes, l_tube, r_tube, s_tube, rho_tube, h_tube, cp_tube, \
+          V_tube, N, epsilon,\
           cells_ax, cells_rad, cell_dz, cell_dr, cell_z_centers, cell_r_centers, cell_V,\
           cat_shape, cat_dimensions, d_cat_part, cat_BET_area, cat_composition, cat_cp, rho_cat, rho_cat_bulk, W_cat]
 
@@ -483,23 +486,24 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
         
     write_out_json_steady(names, values, path_sim_data, t_abs, 0)
     
-    # !!! Copy relaxation factor in case we change it later
+    # Don't change starting value of relaxation factor
     relax = copy.deepcopy(relax_start)
     
     # Enter a while loop, condition to drop below convergence limit
     for iteration in range(1,max_iter+1):
 
         # Calculate/retrieve wall temperature
+        
         T_wall_n = gv.Twall_func.steady(relax, T_wall_n, field_Ci_n[:,0,:], field_T_n[0,:], field_v)
         
         # Get steady fluxes from crank nicholson scheme
         C_fluxes_CN, T_fluxes_CN = mf.steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wall_n,\
-                           field_D_er, field_v, field_p,\
-                           dz_mgrid, dr_mgrid, cell_V, r_centers_mgrid,
-                           rho_cat_bulk, field_BET_cat, d_cat_part, cat_cp, cat_shape,
-                           epsilon, N, adv_index, diff_index, pi_limit, nu_i, nu_j,\
-                           relax)        
-        
+                            field_D_er, field_v, field_p,\
+                            dz_mgrid, dr_mgrid, cell_V, r_centers_mgrid,
+                            rho_cat_bulk, field_BET_cat, d_cat_part, cat_cp, cat_shape,
+                            epsilon, N, adv_index, diff_index, pi_limit, nu_i, nu_j,\
+                            relax)       
+            
         # From fluxes at n and n+1, get timestep n+1
         field_Ci_n1 = field_Ci_n + C_fluxes_CN  * relax
         field_T_n1 = field_T_n + T_fluxes_CN * relax
@@ -512,7 +516,7 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
         if counter_save >= steady_save_every:
             
             # Get fields of: rates of reaction and formation, and viscosity
-            MSR_rate, MD_rate, WGS_rate, CH3OH_rate, H2O_rate, H2_rate, CO2_rate, CO_rate = mf.get_rate_fields(field_Ci_n1, field_T_n1, field_p, field_BET_cat,
+            MSR_rate, MD_ate, WGS_rate, CH3OH_rate, H2O_rate, H2_rate, CO2_rate, CO_rate = mf.get_rate_fields(field_Ci_n1, field_T_n1, field_p, field_BET_cat,
                                                                                                         pi_limit)
             # Get mass flows at inlet and outlet
             m_inlet, m_outlet = mf.get_mass_flow(v_in_n, v_out_n, r_tube, C_in_n, field_Ci_n1)
@@ -527,7 +531,8 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
         if counter_terminal >= steady_write_every:
             print(('Iteration:\t{0} Residuals: \t {1:.3e}').format(str(iteration).ljust(10), residuals))
             counter_terminal = 0
-            print('{0:.5f}-{1:.5f} \t {2:.2e}'.format(T_wall_n[0], T_wall_n[-1], relax))
+            # Print wall temperature at inlet and outlet
+            # print('{0:.5f}-{1:.5f} \t {2:.2e}'.format(T_wall_n[0], T_wall_n[-1]))
         
         # Update old arrays
         field_Ci_n  = copy.deepcopy( field_Ci_n1 )
@@ -642,9 +647,6 @@ if sim_type == 'dynamic':
         # --- Time loop
         while t_rel < t_dur:
             
-            # Change time step size for last time step
-            # dt = min(dt, t_dur - t_rel)
-             
             # --- RK4 arrays
             # Time 
             RK_dt = np.asarray([0, dt/2, dt/2, dt])
@@ -665,7 +667,7 @@ if sim_type == 'dynamic':
                 W_cat, SC_ratio, r_tube,
                 T_wall_n, RK_T_in, RK_WF_in, RK_p_ref, p_set_pos,
                 field_Ci_n, field_T_n,
-                rho_cat_bulk, field_BET_cat, d_cat_part, cat_cp, cat_shape, d_tube, l_tube,
+                rho_cat_bulk, field_BET_cat, d_cat_part, cat_cp, cat_shape, d_tube_in, l_tube,
                 epsilon, N, pi_limit, nu_i, nu_j, adv_index, diff_index)
             
             # --- Evolve in time using fluxes and dt
@@ -705,7 +707,7 @@ if sim_type == 'dynamic':
                     
             if v_in_n != v_in_prev: # If velocity changed
             # Calculate new radial diffusion coefficient
-                field_D_er = mf.radial_diffusion_coefficient(field_v, d_cat_part, d_tube)
+                field_D_er = mf.radial_diffusion_coefficient(field_v, d_cat_part, d_tube_in)
         
             counter_save += 1
             if counter_save >= dyn_save_every:

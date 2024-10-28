@@ -93,7 +93,7 @@ def simulation_inputs(input_json_fname):
     # --- Reactor parameters
     n_tubes = int(reactor['total number of tubes in the reactor [-]'])
     tube_l = float(reactor['single tube length [m]'])
-    tube_d = float(reactor['single tube diameter [m]'])
+    tube_d_in = float(reactor['single tube inner diameter [m]'])
     
     tube_s = float(reactor['single tube wall thickness [m]'])
     tube_rho = float(reactor['material density [kg m-3]'])
@@ -299,7 +299,7 @@ def simulation_inputs(input_json_fname):
             print('Input file saving incorrectly defined (save input files), saving it anyways...')
             
     return_list = [cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bulk, cat_composition, \
-                   n_tubes, tube_l, tube_d, tube_s, tube_rho, tube_h, tube_cp,\
+                   n_tubes, tube_l, tube_d_in, tube_s, tube_rho, tube_h, tube_cp,\
                    ax_cells, rad_cells, adv_scheme, diff_scheme, CFL, partP_limit, Ci_limit,\
                    SC_ratio, p_ref, p_set_pos, inlet_gas_T, init_reactor_T, W_F,\
                    sim_type, max_iter, convergence, relax, dt, dur_time, dyn_bc, cont_sim, cont_data_dir_path,\
@@ -653,7 +653,12 @@ def read_cont_sim_data(cont_data_dir_path):
     SC_ratio = float(setup_file['S/C'])    # Steam to carbon ratio of inlet gas
     n_tubes = int(setup_file['n tubes'])   # Number of reactor tubes
     l_tube = float(setup_file['tube l'])   # Reactor tube length
-    d_tube = float(setup_file['tube r'])*2   # Reactor tube diameter
+    d_tube_in = float(setup_file['tube r in'])*2   # Reactor tube diameter
+    
+    s_tube = float(setup_file['tube s']) # Tube thickness 
+    rho_tube = float(setup_file['tube rho']) # Tube material density
+    h_tube = float(setup_file['tube h']) # [W m-1 K-1] tube material thermal conductivity
+    cp_tube = float(setup_file['tube cp']) # [J kg-1 K-1] tube material specific heat capacity
     
     N = float(setup_file['aspect ratio'])  # Reactor aspect ratio
     epsilon = float(setup_file['porosity']) # Reactor porosity
@@ -712,7 +717,8 @@ def read_cont_sim_data(cont_data_dir_path):
     
     # --- Put all variables into a nice list
     return_list = [t, field_Ci_n, field_T, field_p, field_v, field_BET, wall_temp,\
-                   SC_ratio, n_tubes, l_tube, d_tube, N, epsilon, cells_ax, cells_rad,\
+                   SC_ratio, n_tubes, l_tube, d_tube_in, s_tube, rho_tube, h_tube, cp_tube, \
+                   N, epsilon, cells_ax, cells_rad,\
                    cat_shape, cat_dimensions, rho_cat, rho_cat_bulk, cat_composition, cat_cp, fresh_cat_BET_area]
     
     

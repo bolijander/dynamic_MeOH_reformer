@@ -254,8 +254,7 @@ def gas_mixture_viscosity(X_i, T_C):
     mu_i =[] # empty list of local pure gas viscosities
     
     for i in range(5):
-        # if X_i[i] != 0: # Calculate only if there is some molecular fraction of this substance in a cell
-            mu_i.append( Specie._reg[i].mu_i(T) ) # Calculation of each pure gas viscosity is done within the class Specie
+        mu_i.append( Specie._reg[i].mu_i(T) ) # Calculation of each pure gas viscosity is done within the class Specie
     
     # Convert list to np array
     mu_i = np.array(mu_i)
@@ -268,31 +267,26 @@ def gas_mixture_viscosity(X_i, T_C):
     # A Viscosity Equation for Gas Mixtures, C.R. Wilke (1950) https://doi.org/10.1063/1.1747673
     
     # Make empty arrays of denominators
-    denoms = [] # array of denominators - i start with np.ones so i can skip the +1 from the formula
+    denoms = [] # array of denominators
     
     # Calculate arrays of numerators and denominators
     for i in range(5): # i loop - numerator
         j_list = list(range(5))
-        j_list.remove(i) # Make list for j loop and remove overlapping element
-        phi_temp_sum = 0 # Temporary sum
+        denom_temp_sum = 0 # Temporary sum of denominator 
         for j in j_list: # j loop - denominator
-                # if X_i[j] != 0: # Proceed only if there is some molar fraction 
-                        
                 # numerator of phi
                 k1 = ( 1 + (mu_i[i] / mu_i[j])**(1/2) * (Specie._reg[j].mol_mass / Specie._reg[i].mol_mass)**(1/4) )**2
                 # denominator of phi
                 k2 = math.sqrt(8) * (1 + (Specie._reg[i].mol_mass / Specie._reg[j].mol_mass))**(1/2)
-                    
                 # phi
                 phi_ij = k1 / k2
-                
                 # sum of phi 
-                # phi_temp_sum += phi_ij * X_i[j] / X_i[i]
-                phi_temp_sum += phi_ij * np.divide( X_i[j], X_i[i], out=np.zeros_like(X_i[j]), where=X_i[i]!=0)
-        denoms.append(phi_temp_sum) # Append 
+                denom_temp_sum += phi_ij * X_i[j]
+        denoms.append(denom_temp_sum) # Append to list of denominators
     denoms = np.array(denoms) # Convert to array in the end of loop
 
-    mu_f = sum( np.divide( mu_i, denoms, out=np.zeros_like(mu_i), where=denoms!=0)) # divide and sum up - zeros in numerator cancel out ones in denominator
+    mu_f = sum( X_i*mu_i / denoms )
+    
     return mu_f
 
 
@@ -327,9 +321,9 @@ def Cp_species(T_C):
     
 
     
-def Cp_mixture(X_i, C_p):
+def Cm_mixture(X_i, C_p):
     """
-    Calculate SPECIFIC HEAT CAPACITY of a mixture at given temperature
+    Calculate MOLAR HEAT CAPACITY of a mixture at given temperature
 
     Parameters
     ----------
@@ -348,6 +342,34 @@ def Cp_mixture(X_i, C_p):
     cp_mix = sum( X_i * C_p )
     
     return cp_mix 
+
+
+def Cp_mixture(X_i, C_p):
+    """
+    Calculate SPECIFIC HEAT CAPACITY of a mixture at given temperature
+
+    Parameters
+    ----------
+    X_i : array         
+        [-] Molar fractions of components
+    C_p : array         
+        [J mol-1 K-1] Specific heat capacities of individual species
+
+    Returns
+    -------
+    cp_mix_kg : float      
+        [J kg-1 K-1] Specific heat capacity of a mixture
+    """
+    
+    # Make a 
+    C_p_kg = copy.deepcopy(C_p)
+    
+    for i in range(5):
+        C_p_kg[i] = C_p[i] / (Specie._reg[i].mol_mass /1000)
+        
+    cp_mix_kg = sum( X_i * C_p_kg)
+    
+    return cp_mix_kg
     
     
 
@@ -371,7 +393,6 @@ def specie_mass(V, C_i):
     # Create an empty array of m_i values
     m_i = np.zeros(5)
     for i in range(5):
-        
         m_i[i] = V * C_i[i] * Specie._reg[i].mol_mass
    
     # Convert grams to kilograms (because molar mass is in g mol-1)
@@ -854,7 +875,7 @@ def aspect_ratio(d_ti, d_p):
     return N
 
 
-def radial_thermal_conductivity(u_s, rho_mix, Cp_mix, d_p, X_i, T_C, epsilon, N, Ci_near_wall, shape='sphere'):
+def radial_thermal_conductivity(u_s, rho_mix_mol, Cm_mix, Cp_mix, d_p, X_i, T_C, epsilon, N, Ci_near_wall, shape='sphere'):
     """
     Calculate effective RADIAL THERMAL CONDUCTIVITY in a packed bed
 
@@ -862,10 +883,12 @@ def radial_thermal_conductivity(u_s, rho_mix, Cp_mix, d_p, X_i, T_C, epsilon, N,
     ----------
     u_s : 1D array              
         [m s-] Superficial flow velocity
-    rho_mix : 2D array         
+    rho_mix_mol : 2D array         
         [mol m-3] Gas mixture density
-    Cp_mix : 2D array         
+    Cp_mix_mol : 2D array         
         [J mol-1 K-1] Specific heat capacity of fluid mixture
+    Cp_mix_kg : 2D array         
+        [J kg-1 K-1] Specific heat capacity of fluid mixture
     d_p : float          
         [m] (effective )diameter of catalyst particle
     X_i : 3D         
@@ -910,21 +933,20 @@ def radial_thermal_conductivity(u_s, rho_mix, Cp_mix, d_p, X_i, T_C, epsilon, N,
     
     # NOTE: Array Lambda_i will be the numerators in calculation of Lambda_f
     
-    # Calculate denominators - use np.ones to avoid adding one to each denominator sum
-    Lambda_f_denoms = np.ones((5, np.shape(T)[0] ,np.shape(T)[1]))
+    # Calculate denominators - use np.ones to avoid adding one to each denominator sum for when i = j
+    Lambda_f_denoms = np.zeros((5, np.shape(T)[0] ,np.shape(T)[1]))
     
     # Calculate arrays of denominators
     for i in range(5): # i loop - numerator
         j_list = list(range(5))
-        j_list.remove(i) # Make list for j loop and remove overlapping element
         for j in j_list: # j loop - denominator
             phi_ij = (Specie._reg[j].mol_mass / Specie._reg[i].mol_mass)**(1/2) 
                 
             # sum of phi 
-            Lambda_f_denoms[i] += phi_ij * np.divide(X_i[j], X_i[i], out=np.zeros_like(X_i[j]), where=X_i[i]!=0) # This np divide with special treatment is here to avoid division by zero in matrices
+            Lambda_f_denoms[i] += phi_ij * X_i[j] 
 
     # divide and sum up - zeros in numerator cancel out ones in denominator
-    Lambda_f = sum(Lambda_i/Lambda_f_denoms) # [W m-1 K-1]
+    Lambda_f = sum(Lambda_i * X_i /Lambda_f_denoms) # [W m-1 K-1]
     
     
     # Ratio of thermal conductivity of solid cat. particle and gas fluid
@@ -953,7 +975,7 @@ def radial_thermal_conductivity(u_s, rho_mix, Cp_mix, d_p, X_i, T_C, epsilon, N,
     Pe_h_inf = 8 * (2 - (1 - 2/N)**2) # [-]
     
     # Fluid Peclet number for heat transfer
-    Pe_h_0 = (u_s * rho_mix * Cp_mix * d_p) / Lambda_f
+    Pe_h_0 = (u_s * rho_mix_mol * Cm_mix * d_p) / Lambda_f
     
     # Radial thermal conductivity in packed bed [W m-1 K-1]
     Lambda_er = Lambda_r0 + Lambda_f  *( Pe_h_0/Pe_h_inf)
@@ -974,14 +996,13 @@ def radial_thermal_conductivity(u_s, rho_mix, Cp_mix, d_p, X_i, T_C, epsilon, N,
     
     # Calculate local Reynolds number in a packed bed
     # https://neutrium.net/fluid-flow/packed-bed-reynolds-number/
-    # Re = (d_p * u_s * rho_mix[0,:]) / (mu_mix_wall * (1 - epsilon))
     Re = (d_p * G) / (mu_mix_wall * (1 - epsilon))
 
     # Prandtl number
     Pr = (Cp_mix[0,:] * mu_mix_wall) / Lambda_f[0,:]
     
     # Heat transfer coefficient from Mears https://doi.org/10.1016/0021-9517(71)90073-X
-    h_t = (0.4 * Re**(1/2) + 0.2/Re**(2/3)) * Pr**0.4 * (1 - epsilon)/epsilon * Lambda_f[0,:]/d_p
+    h_t = (0.4 * Re**(1/2) + 0.2*Re**(2/3)) * Pr**0.4 * (1 - epsilon)/epsilon * Lambda_f[0,:]/d_p
     # [W m-2 K-1]
     return Lambda_er, h_t
 
@@ -1022,35 +1043,33 @@ def heat_transfer_coeff_tube(u_s, d_p, T_C, C_i, epsilon):
     # Get Cp of individual species at temperature T
     Cp_i_wall = Cp_species(T_C)
     # Get Cp of mixture
-    Cp_wall_mix = Cp_mixture(X_i_wall, Cp_i_wall) 
+    Cp_wall_mix = Cp_mixture(X_i_wall, Cp_i_wall)
     
     # Lambda_i - thermal conductivites of component i
     Lambda_i = np.zeros((5, np.shape(T)[0] ,np.shape(T)[1]))
     
     for i in range(5):
-        Lambda_i[i] = Specie._reg[i].La + Specie._reg[i].Lb*T + Specie._reg[i].Lc*T**2 + Specie._reg[i].Ld*T**3 +Specie._reg[i].Le*(1/T)**2
-    
+        Lambda_i[i] = Specie._reg[i].La + Specie._reg[i].Lb*T + Specie._reg[i].Lc*T**2 + Specie._reg[i].Ld*T**3 + Specie._reg[i].Le*(1/T)**2
     
     # Lambda_i is in unit [mW m-1 K-1], convert to [W m-1 K-1]
-    Lambda_i = Lambda_i * 0.001
+    Lambda_i = Lambda_i * 0.001 
     
     # NOTE: Array Lambda_i will be the numerators in calculation of Lambda_f
     
-    # Calculate denominators - use np.ones to avoid adding one to each denominator sum
-    Lambda_f_denoms = np.ones((5, np.shape(T)[0] ,np.shape(T)[1]))
+    # Calculate denominators - use np.ones to avoid adding one to each denominator sum for when i = j
+    Lambda_f_denoms = np.zeros((5, np.shape(T)[0] ,np.shape(T)[1]))
     
     # Calculate arrays of denominators
     for i in range(5): # i loop - numerator
         j_list = list(range(5))
-        j_list.remove(i) # Make list for j loop and remove overlapping element
         for j in j_list: # j loop - denominator
             phi_ij = (Specie._reg[j].mol_mass / Specie._reg[i].mol_mass)**(1/2) 
-                
+            
             # sum of phi 
-            Lambda_f_denoms[i] += phi_ij * np.divide(X_i_wall[j], X_i_wall[i], out=np.zeros_like(X_i_wall[j]), where=X_i_wall[i]!=0) # This np divide with special treatment is here to avoid division by zero in matrices
+            Lambda_f_denoms[i] += phi_ij * X_i_wall[j] 
 
     # divide and sum up - zeros in numerator cancel out ones in denominator
-    Lambda_f = sum(Lambda_i/Lambda_f_denoms) # [W m-1 K-1]
+    Lambda_f = sum(Lambda_i * X_i_wall /Lambda_f_denoms) # [W m-1 K-1]
     
     # --- Heat transfer coefficient
     # Heat transfer resistance between the reactor tube wall and catalyst bed has to be calculated
@@ -1069,13 +1088,14 @@ def heat_transfer_coeff_tube(u_s, d_p, T_C, C_i, epsilon):
     # Re = (d_p * u_s * rho_wall_mix) / (mu_mix_wall * (1 - epsilon))
     Re = (d_p * G) / (mu_mix_wall * (1 - epsilon))
 
+
     # Prandtl number
     Pr = (Cp_wall_mix * mu_mix_wall) / Lambda_f
+
     
     # Heat transfer coefficient from Mears https://doi.org/10.1016/0021-9517(71)90073-X
-    h_t = (0.4 * Re**(1/2) + 0.2/Re**(2/3)) * Pr**0.4 * (1 - epsilon)/epsilon * Lambda_f/d_p
+    h_t = (0.4 * Re**(1/2) + 0.2*Re**(2/3)) * Pr**0.4 * (1 - epsilon)/epsilon * Lambda_f/d_p
     # [W m-2 K-1]
-
     return h_t
 
 
@@ -1313,7 +1333,7 @@ class SurfC(object):
 
 # Define instances
 # Values taken from Peppley et.al. (1999) https://doi.org/10.1016/S0926-860X(98)00299-3
-sites = SurfC('Peppley', 7.5e-6, 1.5e-6, 7.5e-6, 1.5e-6) # Surface concentration sites according to Peppley's model
+sites = SurfC('Peppley', 7.5e-6, 1.5e-5, 7.5e-6, 1.5e-5) # Surface concentration sites according to Peppley's model
 
         
 def reaction_rates(p_i, T_C, p_limit=1e-3):
@@ -1339,7 +1359,6 @@ def reaction_rates(p_i, T_C, p_limit=1e-3):
         [mol s-1 m-2] Reaction rate of WGS
 
     """
-    
     # Convert temperature to Kelvin
     T = T_C + 273.15
     
@@ -1348,7 +1367,7 @@ def reaction_rates(p_i, T_C, p_limit=1e-3):
     
     
     # Convert Pascal to bar
-    p_i = abs(p_i) * 1e-5 
+    p_i = p_i * 1e-5
     
     
     # Universal gas constant [J K-1 mol-1] 
@@ -1472,7 +1491,7 @@ def enthalpy_R(C_p, T):
     # CO2       3
     # CO        4
     
-    H_R = 4.95 * 1e4 + (C_p[3] + 3*C_p[2] - C_p[0] - C_p[1]) * T
+    H_R = 4.95 * 1e4 + (C_p[3] + 3*C_p[2] - C_p[0] - C_p[1]) * (T + 273.15 - 298)
     
     return H_R
 
@@ -1500,7 +1519,7 @@ def enthalpy_D(C_p, T):
     # CO2       3
     # CO        4
     
-    H_D = 9.07 * 1e4 + (C_p[4] + 2*C_p[2] - C_p[0]) * T
+    H_D = 9.07 * 1e4 + (C_p[4] + 2*C_p[2] - C_p[0]) * (T + 273.15 - 298)
     
     return H_D
 
@@ -1528,7 +1547,7 @@ def enthalpy_W(C_p, T):
     # CO2       3
     # CO        4
     
-    H_W = -4.12 * 1e4 + (C_p[3] + C_p[2] - C_p[1] - C_p[4]) * T
+    H_W = -4.12 * 1e4 + (C_p[3] + C_p[2] - C_p[1] - C_p[4]) * (T + 273.15 - 298)
     
     return H_W
 
@@ -2149,9 +2168,6 @@ def heat_diffusion_flux(phi_P, phi_EX, phi_EXX, phi_IN, phi_INN, dr, r_P, p_s, h
     # Total flux     
     phi_flux = p_s * (d2_phi + (1/r_P)*d_phi)
     
-    # print(wall_d_phi)
-    # print(wall_d2_phi)
-    
     return phi_flux
 
 
@@ -2272,7 +2288,7 @@ def RK4_fluxes(dt_RK4, times_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, c
         T_wall_RK4, T_in_RK4, WF_in_RK4, p_in_RK4, p_set_pos,
         field_Ci, field_T,
         bulk_rho_c, BET_cat_P, d_cat_part, cat_cp, cat_shape,
-        d_tube, l_tube,
+        d_tube_in, l_tube,
         epsilon, N, pi_limit, nu_i, nu_j, adv_scheme, diff_scheme):
     
     """
@@ -2334,7 +2350,7 @@ def RK4_fluxes(dt_RK4, times_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, c
         [J kg-1 K-1] Catalyst specific heat capacity
     cat_shape : string
         [sphere / cylinder] Shape of catalyst particles
-    d_tube : float
+    d_tube_in : float
         [m] Reactor tube inner diameter
     l_tube : float
         [m] Reactor tube length
@@ -2389,7 +2405,7 @@ def RK4_fluxes(dt_RK4, times_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, c
             Q_in_RK, Q_out_RK, C_in_RK, C_out_RK, rho_in_RK, rho_out_RK, \
             X_in_RK, X_out_RK, mu_in_RK, mu_out_RK = get_IO_velocity_and_pressure(p_in_RK4[RKt], p_set_pos, T_in_RK4[RKt], WF_in_RK4[RKt], SC_ratio, W_cat, epsilon, r_tube, l_tube, d_cat_part, cell_z_centers)
         # Radial diffusion coefficient
-        D_er_RK = radial_diffusion_coefficient(field_v_RK, d_cat_part, d_tube)
+        D_er_RK = radial_diffusion_coefficient(field_v_RK, d_cat_part, d_tube_in)
         
         # Calculate wall temperature profile
         T_wall_RK4 = gv.Twall_func.dynamic(times_RK4[RKt], dt_RK4[RKt], T_wall_RK4, C_array[:,0,:], T_array[0,:], field_v_RK)
@@ -2423,7 +2439,7 @@ def RK4_fluxes(dt_RK4, times_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, c
             Q_in_RK, Q_out_RK, C_in_RK, C_out_n, rho_in_RK, rho_out_RK, \
             X_in_RK, X_out_RK, mu_in_RK, mu_out_RK = get_IO_velocity_and_pressure(p_in_RK4[RKt], p_set_pos, T_in_RK4[RKt], WF_in_RK4[RKt], SC_ratio, W_cat, epsilon, r_tube, l_tube, d_cat_part, cell_z_centers)
         # Calculate new radial diffusion coefficient
-        D_er_RK = radial_diffusion_coefficient(field_v_RK, d_cat_part, d_tube)
+        D_er_RK = radial_diffusion_coefficient(field_v_RK, d_cat_part, d_tube_in)
 
         # Calculate wall temperature profile
         T_wall_RK4 = gv.Twall_func.dynamic(times_RK4[RKt], dt_RK4[RKt], T_wall_RK4, C_array[:,0,:], T_array[0,:], field_v_RK)
@@ -2563,19 +2579,19 @@ def Euler_fluxes(D_er, v_n, p_P,
     # Mass flux for time stepping (dCi / dt)
     mass_flux = (mass_adv_i + mass_diff_i + mass_source_i)/epsilon
     
-    
     # --- Heat transport 
     # Specific heat capacity of every specie
     Cp_i = Cp_species(T_P)
-    # Mixture specific heat capacity
-    Cp_mix = Cp_mixture(X_i, Cp_i) 
+    # Mixture heat capacity - specific and molar
+    Cm_mix = Cm_mixture(X_i, Cp_i) # [J mol-1 K-1]
+    Cp_mix = Cp_mixture(X_i, Cp_i) # [J kg-1 K-1]
     # Density of a mixture 
     rho_mix_mol = mol_density_mixture(Ci_P) 
     # Effective radial thermal conductivity
-    Lambda_er, h_t = radial_thermal_conductivity(v_n, rho_mix_mol, Cp_mix, d_cat_part, X_i, T_P, epsilon, N, Ci_P[:,0,:], cat_shape)    
+    Lambda_er, h_t = radial_thermal_conductivity(v_n, rho_mix_mol, Cm_mix, Cp_mix, d_cat_part, X_i, T_P, epsilon, N, Ci_P[:,0,:], cat_shape)    
     
     # Heat advection term
-    heat_coeff = v_n  * Cp_mix * rho_mix_mol
+    heat_coeff = v_n  * Cm_mix * rho_mix_mol
     heat_adv_i = advection_flux(T_P, T_W, T_WW, cell_dz, heat_coeff, adv_scheme)
 
     # Heat diffusion term
@@ -2590,7 +2606,7 @@ def Euler_fluxes(D_er, v_n, p_P,
     heat_source_i = (source_R + source_D + source_W) * bulk_rho_c *  BET_cat_P
     
     # Heat flux for time stepping (dT / dt)
-    heat_flux = (heat_adv_i + heat_diff_i + heat_source_i) / (epsilon * rho_mix_mol * Cp_mix + bulk_rho_c * cat_cp)
+    heat_flux = (heat_adv_i + heat_diff_i + heat_source_i) / (epsilon * rho_mix_mol * Cm_mix + bulk_rho_c * cat_cp)
 
     return mass_flux, heat_flux
 
@@ -2690,15 +2706,13 @@ def steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_w
     field_Ci_n1 = field_Ci_n + C_fluxes * relax
     field_T_n1 = field_T_n + T_fluxes * relax
     
+    T_wall_n1 = gv.Twall_func.steady(relax, T_wall_n, field_Ci_n1[:,0,:], field_T_n1[0,:], field_v)
     
     # Get fields of neighbouring cells for n1
     field_C_W, field_C_WW, field_C_E, \
         field_C_EX, field_C_EXX, field_C_IN, field_C_INN, \
         field_T_W, field_T_WW, field_T_E, \
-            field_T_EX, field_T_EXX, field_T_IN, field_T_INN = get_neighbour_fields(field_Ci_n1, field_T_n1, cells_rad, C_in_n, T_in_n, T_wall_n)
-
-
-    T_wall_n = gv.Twall_func.steady(relax, T_wall_n, field_Ci_n[:,0,:], field_T_n[0,:], field_v)
+            field_T_EX, field_T_EXX, field_T_IN, field_T_INN = get_neighbour_fields(field_Ci_n1, field_T_n1, cells_rad, C_in_n, T_in_n, T_wall_n1)
 
     
     # Get another set of fluxes at n+1
@@ -2814,7 +2828,7 @@ def steady_Euler_fluxes(D_er, v_n, p_P,
     
     # Mass diffusion term
     mass_diff_i = diffusion_flux(Ci_P, Ci_EX, Ci_EXX, Ci_IN, Ci_INN, cell_dr, cell_r_center, D_er, diff_scheme)
-    
+
     # Mass source term 
     # Mole fractions of species
     X_i = concentration_to_mole_fraction(Ci_P) 
@@ -2822,6 +2836,9 @@ def steady_Euler_fluxes(D_er, v_n, p_P,
     p_i = partial_pressure(p_P, X_i)
     # Reaction rates
     r_R, r_D, r_W = reaction_rates(p_i, T_P, pi_limit)
+    # Clip MSR rate because it can get very high from the initial guess in steady state
+    r_R = np.clip(r_R, None, 1e-3)
+    
     # Formation rates
     r_i = formation_rates(r_R, r_D, r_W, BET_cat_P)
     r_i = np.asarray(r_i) # Convert this to np array
@@ -2834,29 +2851,37 @@ def steady_Euler_fluxes(D_er, v_n, p_P,
     # Specific heat capacity of every specie
     Cp_i = Cp_species(T_P) 
     # Mixture specific heat capacity
-    Cp_mix = Cp_mixture(X_i, Cp_i) 
+    Cm_mix = Cm_mixture(X_i, Cp_i) # [J mol-1 K-1]
+    Cp_mix = Cp_mixture(X_i, Cp_i) # [J kg-1 K-1]
     # Density of a mixture 
     rho_mix_mol = mol_density_mixture(Ci_P) 
     # Effective radial thermal conductivity
-    Lambda_er, h_t = radial_thermal_conductivity(v_n, rho_mix_mol, Cp_mix, d_cat_part, X_i, T_P, epsilon, N, Ci_P[:,0,:], cat_shape)    
+    Lambda_er, h_t = radial_thermal_conductivity(v_n, rho_mix_mol, Cm_mix, Cp_mix, d_cat_part, X_i, T_P, epsilon, N, Ci_P[:,0,:], cat_shape)    
     
     # Heat advection term
-    heat_coeff = v_n  * Cp_mix * rho_mix_mol
+    heat_coeff = v_n  * Cm_mix * rho_mix_mol
     heat_adv_i = advection_flux(T_P, T_W, T_WW, cell_dz, heat_coeff, adv_scheme)
 
     # Heat diffusion term
     heat_diff_i = heat_diffusion_flux(T_P, T_EX, T_EXX, T_IN, T_INN, cell_dr, cell_r_center, Lambda_er, h_t, diff_scheme)
-                        
+    
     # Heat source / sink from individual reactions
     source_R = nu_j * r_R * (- enthalpy_R(Cp_i, T_P) )
     source_D = nu_j * r_D * (- enthalpy_D(Cp_i, T_P) )
     source_W = nu_j * r_W * (- enthalpy_W(Cp_i, T_P) )
 
     # Total heat source/sink   
-    heat_source_i = (source_R + source_D + source_W) * bulk_rho_c *  BET_cat_P  
+    heat_source_i = (source_R + source_D + source_W) * bulk_rho_c * BET_cat_P  
     
+    heat_source_i = heat_source_i 
     # Heat flux for time stepping (dT / dt)
-    heat_flux = (heat_adv_i + heat_diff_i + heat_source_i) / (Cp_mix * rho_mix_mol) #/ (epsilon * rho_mix_mol * Cp_mix + bulk_rho_c * cat_cp)
+    heat_flux = (heat_adv_i + heat_diff_i + heat_source_i) / (Cm_mix * rho_mix_mol) #/ (epsilon * rho_mix_mol * Cm_mix + bulk_rho_c * cat_cp)
+    # heat_flux = (heat_adv_i + heat_diff_i + heat_source_i) / (epsilon * rho_mix_mol * Cm_mix + bulk_rho_c * cat_cp)
+    # heat_flux = (heat_adv_i + heat_diff_i + heat_source_i)
+    # print(np.max(r_R))
+    # print(np.min(r_D))
+    # print(np.min(r_W))
+    # print(heat_flux)
 
 
     return mass_flux, heat_flux
@@ -2923,7 +2948,7 @@ def T_wall_second_derivative(T_P, dz):
     ----------
     T_P : 1D array
         [K] Wall temperatures
-    dz : 1D array
+    dz : float
         [m] Cell spacing array
 
     Returns
@@ -3183,7 +3208,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
         
         # Get material properties
         material_props = json.load(open(input_json_fname))['reactor parameters']
-        d_tube_jh = material_props['single tube diameter [m]']
+        d_tube_in_jh = material_props['single tube inner diameter [m]']
         s_tube_jh = material_props['single tube wall thickness [m]']
         rho_tube_jh = material_props['material density [kg m-3]']
         k_tube_jh = material_props['material thermal conductivity [W m-1 K-1]']
@@ -3196,9 +3221,18 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
         # The current formulas are derived for total wall thickness across diameter so below we use this s2
         s2_tube_jh = s_tube_jh*2
         
+        
         # Axial cell spacing array
         n_cells = len(z_cell_centers) # Number of cells
-        dz = np.ones(n_cells) * (l_tube / n_cells) 
+        dz = (l_tube / n_cells) 
+        
+        # Calculate tube wall cell volume
+        # r_tube_in = d_tube_in_jh/2 # Inner radius
+        # r_tube_out = r_tube_in + s_tube_jh # Outer radius
+        
+        # Cross section area of tube
+        # A_cs_tube = np.pi * (r_tube_out**2 - r_tube_in**2)
+        # dV_tube_cell = A_cs_tube * dz
         
         
         def T_wall_func_steady(self, relax, T_wall, C_near_wall, T_near_wall, u_s, *args, **kwargs): 
@@ -3224,34 +3258,33 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
                 [C] Newly calculated wall temperature profile
 
             """
-            
             C_near_wall = np.rot90(np.reshape(C_near_wall, C_near_wall.shape + (1,)), axes=(1,2))
             T_wall = np.rot90(np.reshape(T_wall, T_wall.shape+(1,)))
             T_near_wall = np.rot90(np.reshape(T_near_wall, T_near_wall.shape+(1,)))
 
-            
             # First get film transfer coefficient
             ht = heat_transfer_coeff_tube(u_s, self.d_p, T_near_wall, C_near_wall, self.epsilon)
             
             d2_T_wall = T_wall_second_derivative(T_wall, dz) # Second derivative along z [K m-2]
-            Q_ax = d2_T_wall #* k_tube_jh
-            
-            # Heat radially transferred to the reactor [kg s-3 m-1]
-            Q_rad = ( (4 * d_tube_jh * ht) / (s2_tube_jh*(2*d_tube_jh + s2_tube_jh)) ) * (T_wall - T_near_wall)
+            Q_ax = d2_T_wall * k_tube_jh
             
             # Heat generated by Joule effect [kg s-3 m-1]
-            # Total heat generated in the reactor 
-            total_Q_gen = (16 * rho_e_tube_jh * I_tube_jh**2) / ( np.pi**2 * s2_tube_jh**2 * (2*d_tube_jh + s2_tube_jh)**2)
-            # Divide total generated heat by number of wall cells
-            Q_gen = (total_Q_gen/n_cells)
+            Q_gen = (16 * rho_e_tube_jh * I_tube_jh**2) / ( np.pi**2 * s2_tube_jh**2 * (2*d_tube_in_jh + s2_tube_jh)**2)
+            
+            # Heat radially transferred to the reactor [kg s-3 m-1]
+            # Q rad is the formula for radial heat transfer but we modify it in steady state to extract T_wall
+            # Q_rad = ( (4 * d_tube_in_jh * ht) / (s2_tube_jh*(2*d_tube_in_jh + s2_tube_jh)) ) * (T_wall - T_near_wall)
+            Q_rad_factor = ( (4 * d_tube_in_jh * ht) / (s2_tube_jh*(2*d_tube_in_jh + s2_tube_jh)) ) #* (T_wall - T_near_wall)
             
             # Total delta T 
-            dT = (Q_ax + Q_gen - Q_rad)  #/ (rho_tube_jh*cp_tube_jh)
+            dT = (Q_ax + Q_gen)/Q_rad_factor  #/ (rho_tube_jh*cp_tube_jh)
             
             # Calculate new wall T profile
-            wall_T_profile = (T_wall + dT*relax).flatten()
+            wall_T_profile = (T_near_wall + dT).flatten()
+            new_T_wall = (wall_T_profile*relax + T_wall*(1-relax)).flatten()
             
-            return wall_T_profile
+            
+            return new_T_wall
         
         
         
@@ -3348,10 +3381,10 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
             Q_ax =  d2_T_wall * k_tube_jh # 
             
             # Heat radially transferred to the reactor [kg s-3 m-1]
-            Q_rad = ( (4 * d_tube_jh * ht) / (s2_tube_jh*(2*d_tube_jh + s2_tube_jh)) ) * (T_wall - T_near_wall)
+            Q_rad = ( (4 * d_tube_in_jh * ht) / (s2_tube_jh*(2*d_tube_in_jh + s2_tube_jh)) ) * (T_wall - T_near_wall)
             
             # Heat generated by Joule effect [kg s-3 m-1]
-            total_Q_gen = (16 * rho_e_tube_jh * I_tube_t**2) / ( np.pi**2 * s2_tube_jh**2 * (2*d_tube_jh + s2_tube_jh)**2)
+            total_Q_gen = (16 * rho_e_tube_jh * I_tube_t**2) / ( np.pi**2 * s2_tube_jh**2 * (2*d_tube_in_jh + s2_tube_jh)**2)
             # Divide total generated heat by number of wall cells
             Q_gen = (total_Q_gen/n_cells)
             
@@ -3360,7 +3393,6 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
             
             # Calculate new wall T profile
             wall_T_profile = (T_wall + dT*dt).flatten()
-            
             
             return wall_T_profile
         

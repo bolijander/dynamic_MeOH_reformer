@@ -15,7 +15,7 @@
 
 
 "numerical parameters":{
-	"number of axial cells [-]": 50,
+	"number of axial cells [-]": 110,
 	"number of radial cells [-]": 20,
 	
 	"advection discretization scheme (upwind_1o / upwind_2o)" : "upwind_2o",
@@ -30,10 +30,10 @@
 
 "reactor parameters":{
 	"total number of tubes in the reactor [-]" : 1,
-	"single tube length [m]": 0.5,
-	"single tube diameter [m]": 0.02,
+	"single tube length [m]": 1,
+	"single tube inner diameter [m]": 0.02,
 	
-	"single tube wall thickness [m]": 0.005,
+	"single tube wall thickness [m]": 0.002,
 	"material density [kg m-3]": 7100,
 	"material thermal conductivity [W m-1 K-1]": 11,
 	"material specific heat capacity [J kg-1 K-1]": 460
@@ -45,14 +45,14 @@
 	"heating type (temperature-profile / flue-gas / joule)": "joule", 
 	
 	"temperature profile parameters": {
-		"reactor wall temperature profile [C]": [261, 261],
+		"reactor wall temperature profile [C]": [220, 220],
 		"wall temperature relative axial positions [-]": [0, 1]
 	},
 	
 	"flue gas parameters":{}, 
 	
 	"joule heating parameters":{
-		"current through single tube [A]": 130,
+		"current through single tube [A]": 90,
 		"tube material electrical resistivity [ohm m]": 1.4e-6
 	}
 	
@@ -64,11 +64,11 @@
 "field parameters":{
 	"feed steam to carbon ratio [-]": 1.5,
 
-	"reactor pressure [bar]": 1,
+	"reactor pressure [bar]": 3,
 	"position of given reactor pressure (inlet / outlet)": "inlet",
 
 	"inlet gas temperature [C]": 250,
-	"initial reactor temperature [C]": 256,
+	"initial reactor temperature [C]": 250,
 	
 	"flow rate given with (WF / WHSV)" : "WF",
 	"W_cat/F_CH3OH - catalyst weight per CH3OH molar feed rate [kg s mol-1]": 150,
@@ -86,14 +86,14 @@
 	"steady simulation parameters":{
 		"maximum iterations": 10000000,
 		"convergence criteria": 1e-6,
-		"underrelaxation factor": 1e-7
+		"underrelaxation factor": 1e-4
 	},
 	
 	"dynamic simulation parameters":{
 		"run a steady simulation first (yes / no)": "no",
 		"continue to dynamic simulation if convergence is not achieved (yes / no)": "yes",
 		"simulated time duration [s]": 50,
-		"timestep size [s]": 5e-4,
+		"timestep size [s]": 2e-4,
 		"dynamic boundary conditions (yes / no)": "no"
 	}
 },
