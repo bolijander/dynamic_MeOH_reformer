@@ -532,7 +532,7 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
             print(('Iteration:\t{0} Residuals: \t {1:.3e}').format(str(iteration).ljust(10), residuals))
             counter_terminal = 0
             # Print wall temperature at inlet and outlet
-            print('{0:.3f}-{1:.3f}, \t {2:.3f}'.format(T_wall_n[0], T_wall_n[-1], np.max(T_wall_n)))
+            # print('{0:.3f}-{1:.3f}'.format(T_wall_n[0], T_wall_n[-1])
         
         # Update old arrays
         field_Ci_n  = copy.deepcopy( field_Ci_n1 )
