@@ -2129,10 +2129,30 @@ def heat_diffusion_flux(phi_P, phi_EX, phi_EXX, phi_IN, phi_INN, dr, r_P, p_s, h
     f1 = coeffs_1d[scheme] # Multiplication factors for first derivative
     f2 = coeffs_2d[scheme] # Multiplication factors for second derivative
     
+    # Multiplication factors for second near wall cell (gets special treatment and is always evaluated w/ 2nd order)
+    f1_nw = [0, 1, -1, 0, 2]
+    f2_nw = [0, 1, -2, 1, 0, 1]
+    
+    
+    # # first derivative evaluation
+    # d_phi = (phi_EXX[1:]*f1[0] + phi_EX[1:]*f1[1] + phi_IN[1:]*f1[2] + phi_INN[1:]*f1[3]) / (dr[1:]*f1[4])
+    # # Second derivative evaluation
+    # d2_phi = (phi_EXX[1:]*f2[0] + phi_EX[1:]*f2[1] + phi_P[1:]*f2[2] + phi_IN[1:]*f2[3] + phi_INN[1:]*f2[4]) / (f2[5]*dr[1:]**2)
+    
+    
+    ## - Second to near near wall cell
     # first derivative evaluation
-    d_phi = (phi_EXX[1:]*f1[0] + phi_EX[1:]*f1[1] + phi_IN[1:]*f1[2] + phi_INN[1:]*f1[3]) / (dr[1:]*f1[4])
+    d_phi_nnw = (phi_EXX[1]*f1_nw[0] + phi_EX[1]*f1_nw[1] + phi_IN[1]*f1_nw[2] + phi_INN[1]*f1_nw[3]) / (dr[1]*f1_nw[4])
     # Second derivative evaluation
-    d2_phi = (phi_EXX[1:]*f2[0] + phi_EX[1:]*f2[1] + phi_P[1:]*f2[2] + phi_IN[1:]*f2[3] + phi_INN[1:]*f2[4]) / (f2[5]*dr[1:]**2)
+    d2_phi_nnw = (phi_EXX[1]*f2_nw[0] + phi_EX[1]*f2_nw[1] + phi_P[1]*f2_nw[2] + phi_IN[1]*f2_nw[3] + phi_INN[1]*f2_nw[4]) / (f2_nw[5]*dr[1]**2)
+    ## - field
+    # first derivative evaluation
+    d_phi = (phi_EXX[2:]*f1[0] + phi_EX[2:]*f1[1] + phi_IN[2:]*f1[2] + phi_INN[2:]*f1[3]) / (dr[2:]*f1[4])
+    # Second derivative evaluation
+    d2_phi = (phi_EXX[2:]*f2[0] + phi_EX[2:]*f2[1] + phi_P[2:]*f2[2] + phi_IN[2:]*f2[3] + phi_INN[2:]*f2[4]) / (f2[5]*dr[2:]**2)
+    # Stack these two arrays
+    d_phi = np.vstack([d_phi_nnw, d_phi])
+    d2_phi = np.vstack([d2_phi_nnw, d2_phi])
     
     
     # --- Near wall cells
@@ -2277,6 +2297,7 @@ def get_neighbour_fields(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wal
     field_T_INN[-2, :] = field_T_INN[-3, :] # Neumann BC
     
     
+    
     return field_C_W, field_C_WW, field_C_E, field_C_EX, field_C_EXX, field_C_IN, field_C_INN, \
         field_T_W, field_T_WW, field_T_E, field_T_EX, field_T_EXX, field_T_IN, field_T_INN
 
@@ -2368,14 +2389,6 @@ def RK4_fluxes(dt_RK4, times_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, c
         Choice of advection scheme
     diff_scheme : int
         Choice of diffusion scheme
-    gcells_z_in : int
-        [-] Number of ghost cells at inlet (axial)
-    gcells_z_out : int
-        [-] Number of ghost cells at outlet (axial)
-    gcells_r_wall : int
-        [-] Number of ghost cells at reactor wall (radial)
-    gcells_r_ax : int
-        [-] Number of ghost cells at reactor axis of symmetry (radial)
 
     Returns
     -------
@@ -3278,11 +3291,13 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
             
             # Total delta T 
             dT = (Q_ax + Q_gen)/Q_rad_factor  #/ (rho_tube_jh*cp_tube_jh)
+            # Clip to avoid massive fluxes while the simulation stabilizes
+            # dT = np.clip(dT, -30, 30) 
             
             # Calculate new wall T profile
             wall_T_profile = (T_near_wall + dT).flatten()
-            new_T_wall = (wall_T_profile*wall_relax + T_wall*(1-wall_relax)).flatten()
             
+            new_T_wall = (wall_T_profile*wall_relax + T_wall*(1-wall_relax)).flatten()
             return new_T_wall
         
         

@@ -495,7 +495,7 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
         # Calculate/retrieve wall temperature
         
         T_wall_n = gv.Twall_func.steady(T_wall_n, field_Ci_n[:,0,:], field_T_n[0,:], field_v)
-        
+
         # Get steady fluxes from crank nicholson scheme
         C_fluxes_CN, T_fluxes_CN = mf.steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wall_n,\
                             field_D_er, field_v, field_p,\
@@ -510,6 +510,9 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
         
         # Calculate residuals - use largest absolte T flux
         residuals = np.max(abs(T_fluxes_CN))
+        
+        # field_C_W, field_C_WW, field_C_E, field_C_EX, field_C_EXX, field_C_IN, field_C_INN, \
+            # field_T_W, field_T_WW, field_T_E, field_T_EX, field_T_EXX, field_T_IN, field_T_INN = mf.get_neighbour_fields(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wall_n)
 
         # Save .json ticker
         counter_save += 1

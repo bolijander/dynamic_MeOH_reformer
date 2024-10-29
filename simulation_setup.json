@@ -15,7 +15,7 @@
 
 
 "numerical parameters":{
-	"number of axial cells [-]": 110,
+	"number of axial cells [-]": 130,
 	"number of radial cells [-]": 20,
 	
 	"advection discretization scheme (upwind_1o / upwind_2o)" : "upwind_2o",
@@ -33,7 +33,7 @@
 	"single tube length [m]": 1,
 	"single tube inner diameter [m]": 0.02,
 	
-	"single tube wall thickness [m]": 0.002,
+	"single tube wall thickness [m]": 0.005,
 	"material density [kg m-3]": 7100,
 	"material thermal conductivity [W m-1 K-1]": 11,
 	"material specific heat capacity [J kg-1 K-1]": 460
@@ -52,7 +52,7 @@
 	"flue gas parameters":{}, 
 	
 	"joule heating parameters":{
-		"current through single tube [A]": 90,
+		"current through single tube [A]": 130,
 		"tube material electrical resistivity [ohm m]": 1.4e-6
 	}
 	
@@ -64,7 +64,7 @@
 "field parameters":{
 	"feed steam to carbon ratio [-]": 1.5,
 
-	"reactor pressure [bar]": 3,
+	"reactor pressure [bar]": 5,
 	"position of given reactor pressure (inlet / outlet)": "inlet",
 
 	"inlet gas temperature [C]": 250,
@@ -80,22 +80,22 @@
 
 "simulation parameters":{
 	"continue simulation from file (yes / no)": "no",
-	"continuation dir. in results dir.": "jheating_1",
+	"continuation dir. in results dir.": "jheating_dyntest",
 	"simulation type (steady / dynamic)": "steady",
 	
 	"steady simulation parameters":{
 		"maximum iterations": 10000000,
-		"convergence criteria": 1e-6,
-		"field underrelaxation factor": 2e-4,
-		"wall underrelaxation factor": 0.2
+		"convergence criteria": 1e-8,
+		"field underrelaxation factor": 1e-3,
+		"wall underrelaxation factor": 0.08
 	},
 	
 	"dynamic simulation parameters":{
-		"run a steady simulation first (yes / no)": "no",
+		"run a steady simulation first (yes / no)": "yes",
 		"continue to dynamic simulation if convergence is not achieved (yes / no)": "yes",
-		"simulated time duration [s]": 50,
-		"timestep size [s]": 2e-4,
-		"dynamic boundary conditions (yes / no)": "no"
+		"simulated time duration [s]": 100,
+		"timestep size [s]": 5e-4,
+		"dynamic boundary conditions (yes / no)": "yes"
 	}
 },
 
@@ -106,9 +106,9 @@
 
 
 "save file parameters":{
-	"show results only in terminal (yes / no)" : "yes",
+	"show results only in terminal (yes / no)" : "no",
 	
-	"new results directory name": "jheating_1",
+	"new results directory name": "jheating_dyntest",
 	"save simulation output .json files (yes / no)": "yes",
 	"save log (yes / no)": "no",
 	
@@ -149,9 +149,9 @@
 		
 		"joule heating parameters":{
 			"current through single tube in time (t[s], I[A])":[
-				[0, 	0.13],
-				[0.001, 	0.15],
-				[45, 	245]]
+				[0, 	90],
+				[1, 	90],
+				[1, 	120]]
 		}
 	},
 	
