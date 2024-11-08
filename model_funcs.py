@@ -3291,8 +3291,6 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
             
             # Total delta T 
             dT = (Q_ax + Q_gen)/Q_rad_factor  #/ (rho_tube_jh*cp_tube_jh)
-            # Clip to avoid massive fluxes while the simulation stabilizes
-            # dT = np.clip(dT, -30, 30) 
             
             # Calculate new wall T profile
             wall_T_profile = (T_near_wall + dT).flatten()

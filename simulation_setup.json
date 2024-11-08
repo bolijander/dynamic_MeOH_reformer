@@ -33,7 +33,7 @@
 	"single tube length [m]": 1,
 	"single tube inner diameter [m]": 0.02,
 	
-	"single tube wall thickness [m]": 0.005,
+	"single tube wall thickness [m]": 0.002,
 	"material density [kg m-3]": 7100,
 	"material thermal conductivity [W m-1 K-1]": 11,
 	"material specific heat capacity [J kg-1 K-1]": 460
@@ -52,7 +52,7 @@
 	"flue gas parameters":{}, 
 	
 	"joule heating parameters":{
-		"current through single tube [A]": 130,
+		"current through single tube [A]": 165,
 		"tube material electrical resistivity [ohm m]": 1.4e-6
 	}
 	
@@ -86,7 +86,7 @@
 	"steady simulation parameters":{
 		"maximum iterations": 10000000,
 		"convergence criteria": 1e-8,
-		"field underrelaxation factor": 1e-3,
+		"field underrelaxation factor": 1e-4,
 		"wall underrelaxation factor": 0.08
 	},
 	
