@@ -58,7 +58,7 @@ original_stdout = sys.stdout # save original stdout
 
 # --- Read all inputs from .json file
 cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bulk, cat_composition, \
-    n_tubes, l_tube, d_tube_in, s_tube, rho_tube, h_tube, cp_tube,\
+    n_tubes, l_tube, d_tube_in, s_tube, rho_tube, h_tube, cp_tube, T_fluid_in,\
     cells_ax, cells_rad, adv_scheme, diff_scheme, CFL, pi_limit, Ci_limit,\
     SC_ratio, p_ref_n, p_set_pos, T_in_n, init_T_field, WF_in_n,\
     sim_type, max_iter, convergence, field_relax_start, dt, t_dur, dyn_bc, cont_sim, path_old_sim_data,\
@@ -86,6 +86,9 @@ cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bul
 # rho_tube  [kg m-3] tube material density
 # h_tube    [W m-1 K-1] tube material thermal conductivity
 # cp_tube   [J kg-1 K-1] tube material specific heat capacity
+
+#  --- Reactor heating parameters
+# T_fluid_in  [C] heating fluid inlet temperature
 
 # --- Numerical/discretization parameters 
 # cells_ax  [-] number of axial cells
@@ -190,6 +193,8 @@ p_ref_n = p_ref_n * 1e5 # Convert to Pascal
 # --- Read data for simulation continuation
 if cont_sim == 'yes':
     
+    # !!! INCLUDE READING OF heating fluid temperature
+    
     # --- Read parameters and fields from .json file
     t_abs, field_Ci_n, field_T_n, field_p, field_v, field_BET_cat, T_wall_n,\
         SC_ratio, n_tubes, l_tube, d_tube_in, s_tube, rho_tube, h_tube, cp_tube, \
@@ -279,6 +284,7 @@ elif cont_sim == 'no':
     
     # Take initial wall temperature guess to be the same as outer cell in T field
     T_wall_n = field_T_n[0,:]
+    T_hfluid_n = np.ones(np.shape(T_wall_n))*T_fluid_in
 
     # Make concentration array
     field_Ci_n = np.zeros((5, cells_rad, cells_ax)) # Empty array
@@ -489,15 +495,15 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
     # Don't change starting value of relaxation factor
     field_relax = copy.deepcopy(field_relax_start)
     
+    
     # Enter a while loop, condition to drop below convergence limit
     for iteration in range(1,max_iter+1):
 
-        # Calculate/retrieve wall temperature
-        
-        T_wall_n = gv.Twall_func.steady(T_wall_n, field_Ci_n[:,0,:], field_T_n[0,:], field_v)
+        # Calculate/retrieve wall temperature and heating fluid temperature
+        T_wall_n, T_hfluid_n = gv.Twall_func.steady(T_wall_n, field_Ci_n[:,0,:], field_T_n[0,:], field_v, T_hfluid_n)
 
         # Get steady fluxes from crank nicholson scheme
-        C_fluxes_CN, T_fluxes_CN = mf.steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wall_n,\
+        C_fluxes_CN, T_fluxes_CN = mf.steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wall_n, T_hfluid_n,\
                             field_D_er, field_v, field_p,\
                             dz_mgrid, dr_mgrid, cell_V, r_centers_mgrid,
                             rho_cat_bulk, field_BET_cat, d_cat_part, cat_cp, cat_shape,
@@ -511,15 +517,12 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
         # Calculate residuals - use largest absolte T flux
         residuals = np.max(abs(T_fluxes_CN))
         
-        # field_C_W, field_C_WW, field_C_E, field_C_EX, field_C_EXX, field_C_IN, field_C_INN, \
-            # field_T_W, field_T_WW, field_T_E, field_T_EX, field_T_EXX, field_T_IN, field_T_INN = mf.get_neighbour_fields(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wall_n)
-
         # Save .json ticker
         counter_save += 1
         if counter_save >= steady_save_every:
             
             # Get fields of: rates of reaction and formation, and viscosity
-            MSR_rate, MD_ate, WGS_rate, CH3OH_rate, H2O_rate, H2_rate, CO2_rate, CO_rate = mf.get_rate_fields(field_Ci_n1, field_T_n1, field_p, field_BET_cat,
+            MSR_rate, MD_rate, WGS_rate, CH3OH_rate, H2O_rate, H2_rate, CO2_rate, CO_rate = mf.get_rate_fields(field_Ci_n1, field_T_n1, field_p, field_BET_cat,
                                                                                                         pi_limit)
             # Get mass flows at inlet and outlet
             m_inlet, m_outlet = mf.get_mass_flow(v_in_n, v_out_n, r_tube, C_in_n, field_Ci_n1)

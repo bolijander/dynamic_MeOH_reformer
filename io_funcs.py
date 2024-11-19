@@ -52,6 +52,7 @@ def simulation_inputs(input_json_fname):
     
     catalyst = file['catalyst parameters']
     reactor = file['reactor parameters']
+    heating = file['reactor heating']
     numerics = file['numerical parameters']
     field = file['field parameters']
     operation = file['simulation parameters']
@@ -92,7 +93,7 @@ def simulation_inputs(input_json_fname):
     
     # --- Reactor parameters
     n_tubes = int(reactor['total number of tubes in the reactor [-]'])
-    tube_l = float(reactor['single tube length [m]'])
+    tube_l = float(reactor['reactor tube length [m]'])
     tube_d_in = float(reactor['single tube inner diameter [m]'])
     
     tube_s = float(reactor['single tube wall thickness [m]'])
@@ -100,6 +101,12 @@ def simulation_inputs(input_json_fname):
     tube_h = float(reactor['material thermal conductivity [W m-1 K-1]'])
     tube_cp = float(reactor['material specific heat capacity [J kg-1 K-1]'])
     
+    # --- Reactor heating parameters 
+    heating_choice = str(heating['heating type (temperature-profile / flue-gas / joule)']).lower()
+    if heating_choice == 'flue-gas':
+        T_fluid_in= float(heating['flue gas parameters']['flue gas inlet temperature [C]'])
+    else:
+        T_fluid_in = 0
     
     # --- Numerical parameters
     ax_cells = int(numerics['number of axial cells [-]'])
@@ -176,16 +183,6 @@ def simulation_inputs(input_json_fname):
         subdirs.sort() # Sort this list 
         cont_subdir_path = os.path.join(cont_dir_path, subdirs[-1]) # Take latest entry in list and make path from it 
                             
-
-        # # Check for simulation_setup .json
-        # cont_jsons = []
-        # for file in os.listdir(cont_subdir_path):
-        #     if file.endswith('.json'):
-        #         cont_jsons.append(file)
-        # if len(cont_jsons) != 1:
-        #     raise NameError('Continuation of dynamic simulation not possible:\nsimulation setup .json file not found in directory {0}'.format(cont_dir))
-        # input_json = os.path.join(cont_subdir_path, cont_jsons[0]) # Path to json
-        
         # Check for sim_data directory
         cont_data_dir_path = os.path.join(cont_subdir_path, 'sim_data')
         if not os.path.exists(cont_data_dir_path):
@@ -299,7 +296,7 @@ def simulation_inputs(input_json_fname):
             print('Input file saving incorrectly defined (save input files), saving it anyways...')
             
     return_list = [cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bulk, cat_composition, \
-                   n_tubes, tube_l, tube_d_in, tube_s, tube_rho, tube_h, tube_cp,\
+                   n_tubes, tube_l, tube_d_in, tube_s, tube_rho, tube_h, tube_cp, T_fluid_in,\
                    ax_cells, rad_cells, adv_scheme, diff_scheme, CFL, partP_limit, Ci_limit,\
                    SC_ratio, p_ref, p_set_pos, inlet_gas_T, init_reactor_T, W_F,\
                    sim_type, max_iter, convergence, field_relax, dt, dur_time, dyn_bc, cont_sim, cont_data_dir_path,\

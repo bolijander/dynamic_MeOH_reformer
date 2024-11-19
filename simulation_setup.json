@@ -15,7 +15,7 @@
 
 
 "numerical parameters":{
-	"number of axial cells [-]": 130,
+	"number of axial cells [-]": 50,
 	"number of radial cells [-]": 20,
 	
 	"advection discretization scheme (upwind_1o / upwind_2o)" : "upwind_2o",
@@ -29,11 +29,18 @@
 
 
 "reactor parameters":{
-	"total number of tubes in the reactor [-]" : 1,
-	"single tube length [m]": 1,
-	"single tube inner diameter [m]": 0.02,
+	"total number of tubes in the reactor [-]" : 5,
+	"reactor shell inner diameter [m]": 0.24,
 	
-	"single tube wall thickness [m]": 0.002,
+	"number of baffle plates [-]": 4,
+	"baffle window height as percentage of baffle diameter [-]": 0.25,
+	"number of tubes in baffle window [-]": 2,
+	"tube pitch [m]": 0.05,
+	
+	"reactor tube length [m]": 0.48,
+	"single tube inner diameter [m]": 0.032,
+	"single tube wall thickness [m]": 0.001,
+	
 	"material density [kg m-3]": 7100,
 	"material thermal conductivity [W m-1 K-1]": 11,
 	"material specific heat capacity [J kg-1 K-1]": 460
@@ -42,14 +49,20 @@
 
 
 "reactor heating":{
-	"heating type (temperature-profile / flue-gas / joule)": "joule", 
+	"heating type (temperature-profile / flue-gas / joule)": "flue-gas", 
 	
 	"temperature profile parameters": {
 		"reactor wall temperature profile [C]": [220, 220],
 		"wall temperature relative axial positions [-]": [0, 1]
 	},
 	
-	"flue gas parameters":{}, 
+	"flue gas parameters":{
+		"flue gas composition (combusted-methane)": "combusted-methane",
+		"flue gas flow direction (co-current / counter-current)": "co-current",
+		"flue gas inlet temperature [C]": 400,
+		"flue gas inlet pressure [bar]": 1.2,
+		"flue gas mass flow [kg s-1]": 0.015
+	}, 
 	
 	"joule heating parameters":{
 		"current through single tube [A]": 165,
@@ -62,16 +75,16 @@
 
 
 "field parameters":{
-	"feed steam to carbon ratio [-]": 1.5,
+	"feed steam to carbon ratio [-]": 1.3,
 
-	"reactor pressure [bar]": 5,
-	"position of given reactor pressure (inlet / outlet)": "inlet",
+	"reactor pressure [bar]": 1,
+	"position of given reactor pressure (inlet / outlet)": "outlet",
 
 	"inlet gas temperature [C]": 250,
 	"initial reactor temperature [C]": 250,
 	
 	"flow rate given with (WF / WHSV)" : "WF",
-	"W_cat/F_CH3OH - catalyst weight per CH3OH molar feed rate [kg s mol-1]": 150,
+	"W_cat/F_CH3OH - catalyst weight per CH3OH molar feed rate [kg s mol-1]": 234,
 	"WHSV - hourly CH3OH molar feed rate per catalyst weight [mol h-1 kg-1]": 30
 },
 
@@ -87,7 +100,7 @@
 		"maximum iterations": 10000000,
 		"convergence criteria": 1e-8,
 		"field underrelaxation factor": 1e-4,
-		"wall underrelaxation factor": 0.08
+		"wall underrelaxation factor": 0.1
 	},
 	
 	"dynamic simulation parameters":{
@@ -106,7 +119,7 @@
 
 
 "save file parameters":{
-	"show results only in terminal (yes / no)" : "no",
+	"show results only in terminal (yes / no)" : "yes",
 	
 	"new results directory name": "jheating_dyntest",
 	"save simulation output .json files (yes / no)": "yes",

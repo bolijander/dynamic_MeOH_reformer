@@ -33,7 +33,7 @@ import global_vars as gv
 # Define class for all species and their characteristics
 class Specie(object):
     _reg = [] # Registry of created instances
-    def __init__(self, name, Vc, Tc, w, mu, OH_groups, mol_mass, La, Lb, Lc, Ld, Le, Cpa, Cpb, Cpc, Cpd, Cpe):
+    def __init__(self, name, Vc, Tc, w, mu, OH_groups, mol_mass, La, Lb, Lc, Ld, Le, Cma, Cmb, Cmc, Cmd, Cme):
         self._reg.append(self)
         self.name = name
         self.Vc = Vc # critical volume [cm3 mol-1]
@@ -50,12 +50,12 @@ class Specie(object):
         self.Ld = Ld
         self.Le = Le
         
-        # Values for caluclating specific heat capacity (Cp_i)
-        self.Cpa = Cpa
-        self.Cpb = Cpb
-        self.Cpc = Cpc
-        self.Cpd = Cpd
-        self.Cpe = Cpe
+        # Values for caluclating specific heat capacity (Cp_i) using the Shomate equation
+        self.Cma = Cma
+        self.Cmb = Cmb
+        self.Cmc = Cmc
+        self.Cmd = Cmd
+        self.Cme = Cme
         
         # --- Given and calculated values needed for gas_mixture_viscosity function
         # Parameters for calculation of gas viscosities
@@ -82,37 +82,50 @@ class Specie(object):
         Omega_v = self.A*(T_star**(-self.B)) + self.C*np.exp(-self.D*T_star) + self.E*np.exp(-self.F*T_star)
         self.result = 40.758*( self.Fc*((self.mol_mass * T)**(1/2)) / (self.Vc**(2/3) * Omega_v)) 
         return self.result
+    
+    # Shomate equation for gas phase molar heat capacity
+    def Cm_i(self, T):
+        T_K = T+273.15 # Temperature in kelvin
+        t = T_K/1000
+        self.Cm_result = self.Cma + self.Cmb*t +self.Cmc*t**2 + self.Cmd*t**3 + self.Cme*(1/t)**2
+        return self.Cm_result
         
 # Define specie instances
 CH3OH = Specie('CH3OH', 118.0, 512.64, 0.557970015, 1.7, 1, 32.042, \
                # Lambda_i values
            8.0364e-5, 0.013, 1.4250e-4, -2.8336e-8, 1.2646e-9, \
-               # Cp_i values
+               # Cm_i values
                13.93945, 111.30774, -41.59074, 5.482564, 0.052037)
     
 H2O = Specie('H2O', 55.95, 647.14, 0.331157716, 1.84, 0, 18.01528, \
              # Lambda_i values
                  0.4365, 0.0529, 1.0053e-5, 4.8426e-8, 2.3506e-5, \
-                 # Cp_i values
+                 # Cm_i values
                  30.092, 6.832514, 6.7934356, -2.534480, 0.0821398)
     
 H2 = Specie('H2', 64.20, 32.98, -0.22013078, 0, 0, 2.01568, \
             # Lambda_i values
                 -11.9, 0.8870, -9.2345e-4, 5.6111e-7, -0.0026, \
-                    # Cp_i values
+                    # Cm_i values
                 33.066178, -11.363417, 11.432816, -2.772874, -0.158558)  
 
-CO2 = Specie('CO2', 94.07, 304.12, 0.403593352, 0, 0, 44.01, \
+CO2 = Specie('CO2', 94.07, 304.12, 0.239, 0, 0, 44.01, \
              # Lambda_i values
                  0.6395, 0.019, 1.5214e-4, -1.1666e-7, 7.8815e-5, \
-                     # Cp_i values
+                     # Cm_i values
                 24.99735, 55.18696, -33.69137, 7.948387, -0.136638)  
     
 CO = Specie('CO', 93.10, 132.85, 0.053424305, 0.122, 0, 28.01,\
             # Lambda_i values
                 0.0185, 0.0918, -3.1038e-5, 8.1127e-9, 9.7460e-7, \
-                    # Cp_i values
+                    # Cm_i values
                 25.56759, 6.096130, 4.054656, -2.671301, 0.131021) 
+    
+N2 = Specie('N2', 89.8, 126.2, 0.039, 0, 0, 28.013, \
+            # Lambda_i values
+                -0.6586197, 0.1079207, -7.37406e-5, 3.355197e-8, -0.00086439, \
+                # Cm_i values
+                28.98641, 1.853978, -9.647459, 16.63537, 0.000117)  
 
     
 def ergun_pressure(p, z, u_s, rho_fluid, d_particle, epsilon, mu_mix, reactor_l, reference_p = 'inlet'):
@@ -290,9 +303,9 @@ def gas_mixture_viscosity(X_i, T_C):
     return mu_f
 
 
-def Cp_species(T_C):
+def Cm_species(T_C):
     """
-    Calculate the SPECIFIC HEAT CAPACITY for INDIVIDUAL SPECIES at given temperature
+    Calculate the SPECIFIC MOLAR HEAT CAPACITY for INDIVIDUAL SPECIES at given temperature
 
     Parameters
     ----------
@@ -311,19 +324,19 @@ def Cp_species(T_C):
     t = T/1000 
     
     # make empty array
-    C_p = np.zeros((5, np.shape(T)[0] ,np.shape(T)[1]  ))
+    C_m = np.zeros((5, np.shape(T)[0] ,np.shape(T)[1]  ))
     
     for i in range(5):
-        C_p[i] = Specie._reg[i].Cpa + Specie._reg[i].Cpb*t + Specie._reg[i].Cpc*t**2 + Specie._reg[i].Cpd*t**3 + Specie._reg[i].Cpe*(1/t)**2
+        C_m[i] = Specie._reg[i].Cma + Specie._reg[i].Cmb*t + Specie._reg[i].Cmc*t**2 + Specie._reg[i].Cmd*t**3 + Specie._reg[i].Cme*(1/t)**2
     
-    return C_p
+    return C_m
     
     
 
     
 def Cm_mixture(X_i, C_p):
     """
-    Calculate MOLAR HEAT CAPACITY of a mixture at given temperature
+    Calculate MOLAR HEAT CAPACITY of a mixture
 
     Parameters
     ----------
@@ -346,7 +359,7 @@ def Cm_mixture(X_i, C_p):
 
 def Cp_mixture(X_i, C_p):
     """
-    Calculate SPECIFIC HEAT CAPACITY of a mixture at given temperature
+    Calculate SPECIFIC HEAT CAPACITY of a mixture
 
     Parameters
     ----------
@@ -361,7 +374,7 @@ def Cp_mixture(X_i, C_p):
         [J kg-1 K-1] Specific heat capacity of a mixture
     """
     
-    # Make a 
+    # Make a deep copy
     C_p_kg = copy.deepcopy(C_p)
     
     for i in range(5):
@@ -446,7 +459,6 @@ def density_mixture(C_i, V, P, T_C):
     mol_mass_mix = m_mix / n_mix # [kg mol-1]
     
     # According to ideal gas law,
-    # rho = (mol_mass * p_ / (R * T)
     rho_mix = (mol_mass_mix * P) / (R*T)
     
     return rho_mix
@@ -946,7 +958,7 @@ def radial_thermal_conductivity(u_s, rho_mix_mol, Cm_mix, Cp_mix, d_p, X_i, T_C,
             Lambda_f_denoms[i] += phi_ij * X_i[j] 
 
     # divide and sum up - zeros in numerator cancel out ones in denominator
-    Lambda_f = sum(Lambda_i * X_i /Lambda_f_denoms) # [W m-1 K-1]
+    Lambda_f = sum(Lambda_i * X_i /Lambda_f_denoms) # [W m-1 K-1] # Thermal conductivity of gas mixture
     
     
     # Ratio of thermal conductivity of solid cat. particle and gas fluid
@@ -1018,7 +1030,7 @@ def heat_transfer_coeff_tube(u_s, d_p, T_C, C_i, epsilon):
     Parameters
     ----------
     u_s : 1D array              
-        [m s-] Superficial flow velocity
+        [m s-1] Superficial flow velocity
     d_p : float          
         [m] (effective) diameter of catalyst particle
     T_C : 1D array            
@@ -1041,9 +1053,9 @@ def heat_transfer_coeff_tube(u_s, d_p, T_C, C_i, epsilon):
     
     X_i_wall = concentration_to_mole_fraction(C_i) 
     # Get Cp of individual species at temperature T
-    Cp_i_wall = Cp_species(T_C)
+    Cm_i_wall = Cm_species(T_C)
     # Get Cp of mixture
-    Cp_wall_mix = Cp_mixture(X_i_wall, Cp_i_wall)
+    Cp_wall_mix = Cp_mixture(X_i_wall, Cm_i_wall)
     
     # Lambda_i - thermal conductivites of component i
     Lambda_i = np.zeros((5, np.shape(T)[0] ,np.shape(T)[1]))
@@ -1467,14 +1479,14 @@ def formation_rates(r_R, r_D, r_W, S_a):
 
 
 
-def enthalpy_R(C_p, T):
+def enthalpy_R(C_m, T):
     """
     Calculate temperature dependant ENTHALPY OF METHANOL STEAM REFORMING reaction
 
     Parameters
     ----------
-    C_p : array         
-        [J mol-1 K-1] Specific heat capacities of individual species
+    C_m : array         
+        [J mol-1 K-1] Specific molar heat capacities of individual species
     T :                 
         [C] Temperature
 
@@ -1491,18 +1503,18 @@ def enthalpy_R(C_p, T):
     # CO2       3
     # CO        4
     
-    H_R = 4.95 * 1e4 + (C_p[3] + 3*C_p[2] - C_p[0] - C_p[1]) * (T + 273.15 - 298)
+    H_R = 4.95 * 1e4 + (C_m[3] + 3*C_m[2] - C_m[0] - C_m[1]) * (T + 273.15 - 298)
     
     return H_R
 
-def enthalpy_D(C_p, T):
+def enthalpy_D(C_m, T):
     """
     Calculate temperature dependant ENTHALPY OF METHANOL DECOMPOSITION reaction
 
     Parameters
     ----------
-    C_p : array         
-        [J mol-1 K-1] Specific heat capacities of individual species
+    C_m : array         
+        [J mol-1 K-1] Specific molar heat capacities of individual species
     T :                 
         [C] Temperature
 
@@ -1519,18 +1531,18 @@ def enthalpy_D(C_p, T):
     # CO2       3
     # CO        4
     
-    H_D = 9.07 * 1e4 + (C_p[4] + 2*C_p[2] - C_p[0]) * (T + 273.15 - 298)
+    H_D = 9.07 * 1e4 + (C_m[4] + 2*C_m[2] - C_m[0]) * (T + 273.15 - 298)
     
     return H_D
 
-def enthalpy_W(C_p, T):
+def enthalpy_W(C_m, T):
     """
     Calculate temperature dependant ENTHALPY OF WATER GAS SHIFT reaction
 
     Parameters
     ----------
     C_p : array         
-        [J mol-1 K-1] Specific heat capacities of individual species
+        [J mol-1 K-1] Specific molar heat capacities of individual species
     T :                 
         [C] Temperature
 
@@ -1547,7 +1559,7 @@ def enthalpy_W(C_p, T):
     # CO2       3
     # CO        4
     
-    H_W = -4.12 * 1e4 + (C_p[3] + C_p[2] - C_p[1] - C_p[4]) * (T + 273.15 - 298)
+    H_W = -4.12 * 1e4 + (C_m[3] + C_m[2] - C_m[1] - C_m[4]) * (T + 273.15 - 298)
     
     return H_W
 
@@ -2594,10 +2606,10 @@ def Euler_fluxes(D_er, v_n, p_P,
     
     # --- Heat transport 
     # Specific heat capacity of every specie
-    Cp_i = Cp_species(T_P)
+    Cm_i = Cm_species(T_P)
     # Mixture heat capacity - specific and molar
-    Cm_mix = Cm_mixture(X_i, Cp_i) # [J mol-1 K-1]
-    Cp_mix = Cp_mixture(X_i, Cp_i) # [J kg-1 K-1]
+    Cm_mix = Cm_mixture(X_i, Cm_i) # [J mol-1 K-1]
+    Cp_mix = Cp_mixture(X_i, Cm_i) # [J kg-1 K-1]
     # Density of a mixture 
     rho_mix_mol = mol_density_mixture(Ci_P) 
     # Effective radial thermal conductivity
@@ -2611,9 +2623,9 @@ def Euler_fluxes(D_er, v_n, p_P,
     heat_diff_i = heat_diffusion_flux(T_P, T_EX, T_EXX, T_IN, T_INN, cell_dr, cell_r_center, Lambda_er, h_t, diff_scheme)
     
     # Heat source / sink from individual reactions
-    source_R = nu_j * r_R * (- enthalpy_R(Cp_i, T_P) )
-    source_D = nu_j * r_D * (- enthalpy_D(Cp_i, T_P) )
-    source_W = nu_j * r_W * (- enthalpy_W(Cp_i, T_P) )
+    source_R = nu_j * r_R * (- enthalpy_R(Cm_i, T_P) )
+    source_D = nu_j * r_D * (- enthalpy_D(Cm_i, T_P) )
+    source_W = nu_j * r_W * (- enthalpy_W(Cm_i, T_P) )
 
     # Total heat source/sink   
     heat_source_i = (source_R + source_D + source_W) * bulk_rho_c *  BET_cat_P
@@ -2628,7 +2640,7 @@ def Euler_fluxes(D_er, v_n, p_P,
 
 
 
-def steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wall_n,\
+def steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wall_n, T_hfluid_n,\
                            field_D_er, field_v, field_p,\
                            dz_mgrid, dr_mgrid, cell_V, r_centers_mgrid,
                            rho_cat_bulk, field_BET_cat, d_cat_part, cat_cp, cat_shape,
@@ -2651,6 +2663,8 @@ def steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_w
         [C] Inlet fluid temperature 
     T_wall_n : 1D array
         [C] Array of Wall temperature
+    T_hfluid_n : 1D array
+        [C] Array of heating fluid temperature
     field_D_er : 1D array
         [m2 s-1] Effective radial diffusion coefficient in packed bed
     field_v : 1D array
@@ -2719,7 +2733,7 @@ def steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_w
     field_Ci_n1 = field_Ci_n + C_fluxes * relax
     field_T_n1 = field_T_n + T_fluxes * relax
     
-    T_wall_n1 = gv.Twall_func.steady(T_wall_n, field_Ci_n1[:,0,:], field_T_n1[0,:], field_v)
+    T_wall_n1, T_hfluid_n1 = gv.Twall_func.steady(T_wall_n, field_Ci_n1[:,0,:], field_T_n1[0,:], field_v, T_hfluid_n)
     
     # Get fields of neighbouring cells for n1
     field_C_W, field_C_WW, field_C_E, \
@@ -2861,11 +2875,11 @@ def steady_Euler_fluxes(D_er, v_n, p_P,
     mass_flux = (mass_adv_i + mass_diff_i + mass_source_i) /epsilon
     
     # --- Heat transport 
-    # Specific heat capacity of every specie
-    Cp_i = Cp_species(T_P) 
+    # Specific molar heat capacity of every specie
+    Cm_i = Cm_species(T_P) 
     # Mixture specific heat capacity
-    Cm_mix = Cm_mixture(X_i, Cp_i) # [J mol-1 K-1]
-    Cp_mix = Cp_mixture(X_i, Cp_i) # [J kg-1 K-1]
+    Cm_mix = Cm_mixture(X_i, Cm_i) # [J mol-1 K-1]
+    Cp_mix = Cp_mixture(X_i, Cm_i) # [J kg-1 K-1]
     # Density of a mixture 
     rho_mix_mol = mol_density_mixture(Ci_P) 
     # Effective radial thermal conductivity
@@ -2879,9 +2893,9 @@ def steady_Euler_fluxes(D_er, v_n, p_P,
     heat_diff_i = heat_diffusion_flux(T_P, T_EX, T_EXX, T_IN, T_INN, cell_dr, cell_r_center, Lambda_er, h_t, diff_scheme)
     
     # Heat source / sink from individual reactions
-    source_R = nu_j * r_R * (- enthalpy_R(Cp_i, T_P) )
-    source_D = nu_j * r_D * (- enthalpy_D(Cp_i, T_P) )
-    source_W = nu_j * r_W * (- enthalpy_W(Cp_i, T_P) )
+    source_R = nu_j * r_R * (- enthalpy_R(Cm_i, T_P) )
+    source_D = nu_j * r_D * (- enthalpy_D(Cm_i, T_P) )
+    source_W = nu_j * r_W * (- enthalpy_W(Cm_i, T_P) )
 
     # Total heat source/sink   
     heat_source_i = (source_R + source_D + source_W) * bulk_rho_c * BET_cat_P  
@@ -2955,7 +2969,7 @@ def new_relax_factor(relax_min, relax_max, residuals, residuals_high_limit, resi
 
 def T_wall_second_derivative(T_P, dz):
     """
-    Calculates second derivatives of wall temperature array with 4th order central bounded difference
+    Calculates second derivatives of wall temperature array with 4th order central bounded difference, used for heat diffusion in wall
 
     Parameters
     ----------
@@ -3004,58 +3018,253 @@ def T_wall_second_derivative(T_P, dz):
 
 
 
-def T_wall_first_derivative(T_P, dz):
+
+
+def flue_gas_first_derivative(T_P, dz, inlet_value, flow_direction):
     """
-    Calculates first derivatives of wall temperature array with 4th order central bounded difference
+    Calculates first derivatives of flue gas temperature array with 2nd order advection scheme
 
     Parameters
     ----------
     T_P : 1D array
-        [K] Wall temperatures
-    dz : 1D array
+        [K] Flue gas temperatures
+    dz : float
         [m] Cell spacing array
+    inlet_value : float
+        [C] West-most value of transported value (temperature)
+    flow_direction : float
+        [-] factor for determining flow direction in the upwind scheme
 
     Returns
     -------
-    d_T_wall : 1D array
-        [K m-1] Second derivative of wall temperature  
+    d_T_fgas : 1D array
+        [K m-1] First derivative of flue gas array
+
+    """
+    # Choose whether we work with flipped array or not (upwind scheme depends on the flow direction)
+    # Do this so that we always work with flue gas flow west-to-east
+    T_P = (0.5+flow_direction*0.5)*T_P + (0.5-flow_direction*0.5)*np.flip(T_P)
+    
+    # Make arrays for W and WW cells 
+    T_W = np.roll(T_P, 1)
+    T_W[0] = inlet_value # Westmost boundary
+    T_WW = np.roll(T_W, 1)
+    T_WW[0] = T_WW[1] # Westmost boundary
+    
+    # Calculate first derivative
+    d_T_fgas = ( (3*T_P -4*T_W + T_WW) / (dz*2) )
+    
+    # Flip the array back (if necessary)
+    d_T_fgas = (0.5+flow_direction*0.5)*d_T_fgas + (0.5-flow_direction*0.5)*np.flip(d_T_fgas)
+
+    return d_T_fgas
+
+
+
+
+
+
+
+# -------------------------------------------------------------
+# --- REACTOR HEATING FUNCTIONS
+# -------------------------------------------------------------
+
+
+# -- flue gas heating
+
+def log_mean_diameter(d_out, d_in):
+    """
+    Calculate log mean diameter of a reactor tube
+
+    Parameters
+    ----------
+    d_out : float
+        [m] Outer tube diameter
+    d_in : float
+        [Inner tube diameter]
+
+    Returns
+    -------
+    d_lm : float
+        [m] Log mean diameter
 
     """
     
-    # Make arrays for EE, E, W, and WW cells 
-    T_E = np.roll(T_P, -1)
-    T_E[0,-1] = T_E[0,-2] # Eastmost boundary
-    T_EE = np.roll(T_E,-1)
-    T_EE[0,-1] = T_EE[0,-2] # Eastmost boundary
+    # Log mean diameter
+    d_lm = (d_out - d_in) / np.log((d_out/d_in))
     
-    T_W = np.roll(T_P, 1)
-    T_W[0,0] = T_W[0,1] # Westmost boundary
-    T_WW = np.roll(T_W, 1)
-    T_WW[0,0] = T_WW[0,1] # Westmost boundary
+    return d_lm
     
+
+def baffle_window_area_fraction(d_shell, opening_percent_d):
+    """
+    Calculate area fraction of baffle plate window based on diameter percentage that is window
+
+    Parameters
+    ----------
+    d_shell : float
+        [m] Reactor shell inner diameter
+    opening_percent_d : float
+        [-] Baffle window height as a percentage of diameter opening
+
+    Returns
+    -------
+    f_bw : float
+        [-] Area fraction of a baffle window (circle segment)
+
+    """
+    #Segment area (A_seg) is sector area (A_sec) minus triangle area (A_tr)
+    r_shell = d_shell/2
+    # Height (sagitta) of segment area
+    h = d_shell * opening_percent_d
+    # Area of segment
+    A_seg = r_shell**2 * np.arccos((1 - (h/r_shell))) - (r_shell-h)*np.sqrt( (r_shell**2 - (r_shell-h)**2) )
     
-    # First derivative evaluation 2o
-    # d_T_wall = (T_E - T_W) / (2*dz)
-    
-    # First derivative evaluation 4o
-    d_T_wall = (-T_EE + 8*T_E - 8*T_W + T_WW) / (12*dz)
-    
-    # Special treatment for near wall cells
-    # Near inlet cells
-    d_T_wall[0,0] = (-3*T_P[0,0] + 4*T_P[0,1] - T_P[0,2]) / (2*dz[0]) # 2o right sided FD 
-    # d_T_wall[0,0] = (-T_P[0,0] + T_P[0,1]) / (dz[0]) # 1o right sided FD 
-    
-    d_T_wall[0,1] = (- T_P[0,0] + T_P[0,2]) / (2*dz[1]) # 2o central difference for second cell
-    
-    # Near outlet cells 
-    d_T_wall[0,-1] = (3*T_P[0,-1] - 4*T_P[0,-2] + T_P[0,-3]) / (2*dz[-1]) # 2o left sided FD 
-    # d_T_wall[0,-1] = (T_P[0,-1] - T_P[0,-2]) / (dz[-1]) # 1o left sided FD 
-    
-    d_T_wall[0,-2] = (- T_P[0,-3] + T_P[0,-1]) / (2*dz[-2]) # 2o central difference for second to last cell
-    
-    return d_T_wall
+    # Area of shell cross section
+    A_shell = r_shell**2 * np.pi
+    # Area fraction 
+    f_bw = A_seg / A_shell
+    return f_bw
 
 
+
+def gas_mixture_thermal_conductivity(X_i, species_indices, T_C):
+    """
+    Calculate thermal conductivity of a gas mixture
+
+    Parameters
+    ----------
+    X_i : 3D         
+        [-] Molar fraction of components
+    species_indices : array
+        [-] indices of species used in this estimation (indices within Specie class, _reg)
+    T_C : 2D array            
+        [C] Temperature
+    Returns
+    -------
+    Lambda_f : 2D array     
+        [W m-1 K-1] Gas mixture thermal conductivity
+    
+    """
+    
+    N_s = len(X_i) # Number of species used in this calculation
+    
+    # Convert temperature to Kelvin 
+    T = T_C + 273.15
+    
+    
+    # Lambda_i - thermal conductivites of component i
+    Lambda_i = np.zeros((N_s, np.shape(T)[0]))
+    
+    
+    for i in range(N_s):
+        i_reg = species_indices[i] # Get index of the species we are using in this calculation
+        Lambda_i[i] = Specie._reg[i_reg].La + Specie._reg[i_reg].Lb*T + Specie._reg[i_reg].Lc*T**2 + Specie._reg[i_reg].Ld*T**3 +Specie._reg[i_reg].Le*(1/T)**2
+
+    # Lambda_i is in unit [mW m-1 K-1], convert to [W m-1 K-1]
+    Lambda_i = Lambda_i * 0.001
+
+    # NOTE: Array Lambda_i will be the numerators in calculation of Lambda_f
+    
+    # Calculate denominators - use np.ones to avoid adding one to each denominator sum for when i = j
+    Lambda_f_denoms = np.zeros((N_s, np.shape(T)[0]))
+    
+    # Calculate arrays of denominators
+    for i in range(N_s): # i loop - numerator
+        j_list = list(range(N_s))
+        for j in j_list: # j loop - denominator
+            i_reg = species_indices[i]
+            j_reg = species_indices[j]
+        
+            phi_ij = (Specie._reg[j_reg].mol_mass / Specie._reg[i_reg].mol_mass)**(1/2) 
+                
+            # sum of phi 
+            Lambda_f_denoms[i] += phi_ij * X_i[j] 
+
+    # divide and sum up - zeros in numerator cancel out ones in denominator
+    Lambda_f = sum((Lambda_i.T * X_i /Lambda_f_denoms.T).T) # [W m-1 K-1] # Thermal conductivity of gas mixture
+
+
+    return Lambda_f
+
+
+
+def flue_gas_viscosity(X_i, species_indices, T_C):
+    """
+    Calculate the (DYNAMIC) VISCOSITY OF GAS MIXTURE
+
+    Parameters
+    ----------
+    X_i : Array     
+        [-] Mole fraction of specie i in order (CH3OH, H2O, H2, CO2, CO)
+    species_indices : array
+        [-] indices of species used in this estimation (indices within Specie class, _reg)
+    T_C :             
+        [C] Fluid temperature 
+
+    Returns
+    -------
+    mu_f :          
+        [Pa s] Gas mixture viscosity 
+
+    """
+    
+    N_s = len(X_i) # Number of species used in this calculation
+    
+    # Convert temperature in Celsius to Kelvin
+    T = T_C + 273.15 
+    
+    # First, calculate the first order solution for local the pure gas viscosities (mu_i)
+    # mu_i is calculated according to:
+    # The Properties of Gases and Liquids - Book by Bruce E. Poling, John Paul O'Connell, and John Prausnitz
+    # p. 9.7 - method of Chung et.al.
+    mu_i =[] # empty list of local pure gas viscosities
+    
+    for i in range(N_s):
+        i_reg = species_indices[i]
+        mu_i.append( Specie._reg[i_reg].mu_i(T) ) # Calculation of each pure gas viscosity is done within the class Specie
+    
+    # Convert list to np array
+    mu_i = np.array(mu_i)
+    
+    # Resulting viscosies are in microPoise, convert to Pascal second
+    mu_i = mu_i * 1e-7
+    # This array will be the numerator in caluclating mixture viscosity
+    
+    # Then, calculate the viscosity of gas mixture, according to:
+    # A Viscosity Equation for Gas Mixtures, C.R. Wilke (1950) https://doi.org/10.1063/1.1747673
+    
+    # Make empty arrays of denominators
+    denoms = [] # array of denominators
+    
+    # Calculate arrays of numerators and denominators
+    for i in range(N_s): # i loop - numerator
+        j_list = list(range(N_s))
+        denom_temp_sum = 0 # Temporary sum of denominator 
+        for j in j_list: # j loop - denominator
+            i_reg = species_indices[i]
+            j_reg = species_indices[j]
+            # numerator of phi
+            k1 = ( 1 + (mu_i[i] / mu_i[j])**(1/2) * (Specie._reg[j_reg].mol_mass / Specie._reg[i_reg].mol_mass)**(1/4) )**2
+            # denominator of phi
+            k2 = math.sqrt(8) * (1 + (Specie._reg[i_reg].mol_mass / Specie._reg[j_reg].mol_mass))**(1/2)
+            # phi
+            phi_ij = k1 / k2
+            # sum of phi 
+            denom_temp_sum += phi_ij * X_i[j]
+        denoms.append(denom_temp_sum) # Append to list of denominators
+    denoms = np.array(denoms) # Convert to array in the end of loop
+
+    mu_f = sum( (X_i*mu_i.T / denoms.T ).T)
+    
+    return mu_f
+
+    
+    
+    
+# -------------------------------------------------------------
+# --- Wall temperature boundary condition
+# -------------------------------------------------------------
 
 def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
     """
@@ -3128,14 +3337,14 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
 
         # Make a function that always returns the same wall T profile        
         def T_wall_func_steady(self, *args, **kwargs):
-            return wall_T_profile
+            return wall_T_profile, 'n/a'
         
         
         # -- Dynamic boundary condition function 
         if dyn_bc == 'no' or condition == 'no': # If we're not using dynamic boundary conditions entirely or if we're not using them for wall temp
             # If dynamic 
             def T_wall_func_dynamic(self, *args, **kwargs):
-                return wall_T_profile
+                return wall_T_profile, 'n/a'
                 
         else: # else if both conditions are true
             # Get axial relative profile
@@ -3171,7 +3380,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
                 Tw_profile = np.asarray(Tw_profile)
                 # Define a function that always returns this profile 
                 def Twall_func_dynamic(self, t, *args, **kwargs):
-                    return Tw_profile
+                    return Tw_profile, 'n/a'
             
             else: # If array has more than 1 temporal point, we have to 
                 # Reshape Tw - "rotate" matrix 90 degrees 
@@ -3209,13 +3418,11 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
                     # Convert to numpy array
                     Tw_profile = np.asarray(Tw_profile)
                     
-                    return Tw_profile
+                    return Tw_profile, 'n/a'
         
         
         
     elif heating_choice == 'joule':
-        # For joule we need to iterate depending on h_wall T_wall, and T_near_wall
-        # In dynamic there is also a t variable which changes I
         
         # Get material properties
         material_props = json.load(open(input_json_fname))['reactor parameters']
@@ -3296,7 +3503,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
             wall_T_profile = (T_near_wall + dT).flatten()
             
             new_T_wall = (wall_T_profile*wall_relax + T_wall*(1-wall_relax)).flatten()
-            return new_T_wall
+            return new_T_wall, 'n/a'
         
         
         
@@ -3403,12 +3610,213 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
             # Calculate new wall T profile
             wall_T_profile = (T_wall + dT*dt).flatten()
             
-            return wall_T_profile
+            return wall_T_profile, 'n/a'
         
         
     elif heating_choice == 'flue-gas': 
-         pass # !!!
-         
+        
+        material_props = json.load(open(input_json_fname))['reactor parameters']
+        # Material properties
+        rho_tube_fgas = material_props['material density [kg m-3]']
+        k_tube_fgas = material_props['material thermal conductivity [W m-1 K-1]']
+        cp_tube_fgas = material_props['material specific heat capacity [J kg-1 K-1]']
+        # Reactor parameters
+        d_tube_in_fgas = material_props['single tube inner diameter [m]'] 
+        s_tube_fgas = material_props['single tube wall thickness [m]']
+        d_shell = material_props['reactor shell inner diameter [m]']
+        p_t = material_props['tube pitch [m]']
+        N_t = material_props['total number of tubes in the reactor [-]']
+        # Baffle parameters
+        N_t_bw = material_props['number of tubes in baffle window [-]']
+        N_bp = material_props['number of baffle plates [-]']
+        BS_op = material_props['baffle window height as percentage of baffle diameter [-]']
+        
+        # Flue gas specifics
+        fgas_composition = steady_heating_params['flue gas composition (combusted-methane)']
+        fgas_flowdir = steady_heating_params['flue gas flow direction (co-current / counter-current)']
+        T_in_fgas = steady_heating_params['flue gas inlet temperature [C]']
+        p_in_fgas = steady_heating_params['flue gas inlet pressure [bar]']
+        m_fgas = steady_heating_params['flue gas mass flow [kg s-1]']
+        
+        # underrelaxation factor specifically for reactor tube wall
+        wall_relax = json.load(open(input_json_fname))['simulation parameters']['steady simulation parameters']['wall underrelaxation factor']
+        flow_relax = json.load(open(input_json_fname))['simulation parameters']['steady simulation parameters']['field underrelaxation factor']
+        
+        ##
+        ## -- Start calculating stuff
+        ## 
+        
+        n_cells = len(z_cell_centers) # Number of cells
+        dz = (l_tube / n_cells) # spacing between cells 
+        
+        # The current formulas are derived for total wall thickness across diameter so below we use this s2
+        s2_tube_fgas = s_tube_fgas*2
+        
+        
+        # --- Calculate some geometric variables
+        d_tube_out = d_tube_in_fgas + s_tube_fgas*2
+        if d_tube_out >= p_t: # Make a quick check regarding the physicality 
+            raise ValueError('Non physical reactor dimensions received: tube pitch must be larger than reactor tube outer diameter!')
+        d_lm = log_mean_diameter(d_tube_out, d_tube_in_fgas) # [m] Log mean diameter of reactor tube
+        BS_l = material_props['reactor tube length [m]'] / (N_bp+1) # Baffle spacing
+        f_bw = baffle_window_area_fraction(d_shell, BS_op) # [-] Area fraction of baffle window opening
+        A_bw = f_bw*(np.pi * d_shell**2 / 4) - N_t_bw*(np.pi * d_tube_out**2 / 4) # [m2] Area in baffle window available for flue gas flow (area of window - cross section area of all tubes in baffle window)
+        A_pe = BS_l * d_shell * (1- d_tube_out/p_t) # Interstitial area available for crossflow perpendicular to the bank of tubes at te widest point in the shell
+        
+        # --- flue gas flow direction
+        if fgas_flowdir.lower() == 'co-current': # Convert the flow direction input to a +/- factor that we'll use in the equations
+            fgas_flowdir = 1
+        elif fgas_flowdir.lower() == 'counter-current':
+            fgas_flowdir = -1
+        else:
+            raise ValueError('Flue gas flow direction not recognized:', fgas_flowdir)
+        
+        # --- Make functions for dependent flue gas variables
+        if fgas_composition.lower() == 'combusted-methane':
+            Mw_fgas = 0.095*CO2.mol_mass + 0.19*H2O.mol_mass + 0.715*N2.mol_mass # [g/mol] - molecular weight
+            
+            def Cp_fgas_mixture(T): # Define a function of flue gas mixture Cp dependant on temperature
+                Cp_mixture = (0.095*CO2.Cm_i(T)/CO2.mol_mass + 0.19*H2O.Cm_i(T)/H2O.mol_mass + 0.715*N2.Cm_i(T)/N2.mol_mass ) * 1000
+                return Cp_mixture 
+            #Indices and molar fractions of corresponding indices needed to calculate thermal conductivity of gas mixture
+            reg_class_indices = np.asarray([1,3,5]) # 0=CH3OH, 1=H2O, 2=H2, 3=CO2, 4=CO, 5=N2
+            X_i_fgas = np.asarray([0.19, 0.095, 0.715]) # Molar fraction of gases used 
+            
+        else: 
+            raise ValueError('Flue gas composition not recognized:', fgas_composition)
+        
+        # --- Flue gas properties 
+        # Define a small function to get density dependant on temperature (assume no pressure drop)
+        def rho_fgas(T): 
+            # T is in [C]
+            R = 8.31446261815324 # [J K-1 mol-1] Ideal gas constant 
+            rho_fgas = (p_in_fgas *1e5)/(R * (T+273.15)) * Mw_fgas*1e-3 # Ideal gas law for flue gas density
+            return rho_fgas # [kg m-3]
+        
+        # Flue gas flow 
+        Q_fgas = m_fgas / rho_fgas(T_in_fgas) # [m3 s-1] Volumetric flow of flue gas
+        u_s_fgas = Q_fgas/A_pe # [m s-1] superficial velocity of flue gas
+        # u_s_fgas = np.sqrt((Q_fgas/A_pe)*(Q_fgas/A_bw)) # [m s-1] superficial velocity of flue gas
+        # !!! Note - superficial velocity will  change if we stop using constant pressure at some point
+        # Also check if i need to calculate superficial velocity based on both openinngs (A_pe and A_bw) like i do for mass velocity below
+        
+        # Mass velocities
+        G_p = m_fgas / A_pe # [kg m-2 s-1] # mass velocity for crossflow perpendicular to the tubes
+        G_b = m_fgas / A_bw # [kg m-2 s-1] Mass velocity through the baffle window
+        G_e = np.sqrt(G_b * G_p) # [kg m-2 s-1] Mass velocity of gas mixture
+        # --- heat transfer coefficient through the tube wall
+        # [W-1 m2 K] It's in this form because i combine it with h_shell into Uw in the function below
+        h_wall = (s_tube_fgas/k_tube_fgas) * (d_tube_in_fgas/d_lm)
+        
+        def gas_to_wall_Uw(T_fgas):
+            """
+            Calculate heat transfer coefficient from flue gas to tube wall inner edge
+
+            Parameters
+            ----------
+            T_fgas : array
+                [C] Flue gas temperature profile
+
+            Returns
+            -------
+            h_s : array
+                [W m-2 K-1] Heat transfer coefficient for the shell side fluid 
+            Uw : array
+                [W m-2 K-1] Combined heat transfer coefficient
+
+            """
+            
+            # --- First get some flue gas properties that are dependant on temperature
+            # Get flue gas viscosity
+            mu_fgas = flue_gas_viscosity(X_i_fgas, reg_class_indices, T_fgas)
+            # Get flue gas thermal conductivity
+            k_fgas = gas_mixture_thermal_conductivity(X_i_fgas, reg_class_indices, T_fgas)
+            # Get flue gas thermal capacity
+            Cp_fgas = Cp_fgas_mixture(T_fgas)
+            
+            # Donohue equation - get heat transfer coefficient in the shell side film of a shell-tube heat exchanger
+            h_s = 0.2*(d_tube_out * G_e / mu_fgas)**(0.6) * (Cp_fgas * mu_fgas / k_fgas)**(0.33) * (k_fgas / d_tube_out)
+            
+            # -- Calculate heat transfer coefficient from flue gas to tube wall internal edge
+            Uw = 1 / (h_wall + (d_tube_in_fgas / h_s / d_tube_out) )
+            return h_s, Uw
+        
+        
+        # --- Twall functions
+        
+        def T_wall_func_steady(self, T_wall, C_near_wall, T_near_wall, u_s, T_fgas, *args, **kwargs): 
+            """
+            Calculates wall temperature from Joule heating
+
+            Parameters
+            ----------
+            relax : float
+                [-] Underrelaxation factor
+            T_wall : 1D array
+                [C] Current wall temperature profile
+            C_near_wall : 2D array
+                [mol m-3] Current specie sconcentration array of internal cells adjacent to the wall
+            T_near_wall : 1D array
+                [C] Current temperature array of internal cells adjacent to the wall
+            u_s : 1D array
+                [m s-1] Superficial velocity
+
+            Returns
+            -------
+            wall_T_profile : 1D array
+                [C] Newly calculated wall temperature profile
+
+            """
+            
+            C_near_wall = np.rot90(np.reshape(C_near_wall, C_near_wall.shape + (1,)), axes=(1,2))
+            T_wall = np.rot90(np.reshape(T_wall, T_wall.shape+(1,)))
+            T_near_wall = np.rot90(np.reshape(T_near_wall, T_near_wall.shape+(1,)))
+
+            # First get film transfer coefficient
+            ht = heat_transfer_coeff_tube(u_s, self.d_p, T_near_wall, C_near_wall, self.epsilon)
+            
+            d2_T_wall = T_wall_second_derivative(T_wall, dz) # Second derivative along z [K m-2]
+            Q_ax = d2_T_wall * k_tube_fgas
+            
+            # -- Tube heating by hot flue gas
+            # First get heat transfer coefficient
+            Uw, h_s = gas_to_wall_Uw(T_fgas) 
+            # [kg s-3 m-1] Heat transfer 'factor' from flue gas to the wall
+            # F_fg_w = 4 * h_s / d_tube_out  # Omitted number of tubes from the equation because this is the heat given to ONE reactor tube
+            F_fg_w =  ( (4 * d_tube_out * h_s) / (s2_tube_fgas*(2*d_tube_in_fgas + s2_tube_fgas)) )
+
+            # -- Heat radially transferred to the reactor [kg s-3 m-1]
+            # # Q rad is the formula for radial heat transfer but we modify it in steady state to extract T_wall
+            # Q_rad = ( (4 * d_tube_in_fgas * ht) / (s2_tube_fgas*(2*d_tube_in_fgas + s2_tube_fgas)) ) * (T_wall - T_near_wall)
+            # 'Factor' for heat transfer from wall to reactor
+            F_w_r = ( (4 * d_tube_in_fgas * ht) / (s2_tube_fgas*(2*d_tube_in_fgas + s2_tube_fgas)) ) #* (T_wall - T_near_wall)
+            
+            # --- New wall delta T 
+            wall_T_profile =( (Q_ax + F_w_r*T_near_wall + F_fg_w*T_fgas)/(F_w_r+F_fg_w) ).flatten()
+            # Relaxed wall T profile
+            new_T_wall = (wall_T_profile*wall_relax + T_wall*(1-wall_relax)).flatten()
+            
+
+            # --- New flue gas temperature 
+            # First derivative of flue gas temperature
+            d_T_fgas = flue_gas_first_derivative(T_fgas, dz, T_in_fgas, fgas_flowdir)
+            # Define the product of Cp and rho because we use it multiple times
+            Cp_rho_factor = Cp_fgas_mixture(T_fgas) * rho_fgas(T_fgas)
+            # Heat transfer in flue gas due to advection
+            Q_fgas_ax = d_T_fgas * u_s_fgas * Cp_rho_factor
+            
+            # Radial heat transfer to the reactor tube
+            Q_fgas_rad = N_t* 4 * h_s / d_tube_out * (T_fgas - T_wall) # Number of tubes included here because it's the heat taken away from flue gas by all tubes
+            # Calculate dT for flue gas
+            dT_fgas = (-Q_fgas_ax - Q_fgas_rad.flatten()) / Cp_rho_factor
+            # Calculate new flue gas value
+            new_T_fgas = T_fgas +  dT_fgas * flow_relax
+            
+            return new_T_wall, new_T_fgas
+
+        def T_wall_func_dynamic(self, t, dt, T_wall, C_near_wall, T_near_wall, u_s, *args, **kwargs):
+            pass
+        
     class Twall(): # Create an empty class that will contain methods for calculating Twall
         pass 
     
@@ -3419,8 +3827,8 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
     # Define a class instance within global variables module
     gv.Twall_func = Twall()
     
-    
-    # Define additional functions in class for output file writing
+    # --- Define additional variables and functions in class for output file writing
+    # Joule heating 
     if heating_choice == 'joule':
         def I_func(self, t):
             I = I_in_func(t)
@@ -3428,8 +3836,15 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
         Twall.I_func = I_func
     else: 
         Twall.I_func = lambda self, t : 'n/a'
-    
-    
+    # Flue gas
+    if heating_choice == 'flue-gas':
+        Twall.T_fgas = np.ones((n_cells)) * T_in_fgas # Initialize/define the flue gas temperature profile with inlet 
+    else: 
+        Twall.T_fgas = 'n/a'
+        
+    # !!! A couple things to pass to a class, that i'll use later (at least for file writing)
+    # functions of flue gas inlet: mass flow, temperature, and pressure 
+    # Flue gas composition? maybe 
     
     return heating_choice
 
