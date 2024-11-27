@@ -193,10 +193,8 @@ p_ref_n = p_ref_n * 1e5 # Convert to Pascal
 # --- Read data for simulation continuation
 if cont_sim == 'yes':
     
-    # !!! INCLUDE READING OF heating fluid temperature
-    
     # --- Read parameters and fields from .json file
-    t_abs, field_Ci_n, field_T_n, field_p, field_v, field_BET_cat, T_wall_n,\
+    t_abs, field_Ci_n, field_T_n, field_p, field_v, field_BET_cat, T_wall_n, T_hfluid_n,\
         SC_ratio, n_tubes, l_tube, d_tube_in, s_tube, rho_tube, h_tube, cp_tube, \
         N, epsilon, cells_ax_old, cells_rad_old,\
         cat_shape, cat_dimensions, rho_cat, rho_cat_bulk, cat_composition, cat_cp, cat_BET_area = io.read_cont_sim_data(path_old_sim_data)
@@ -226,10 +224,11 @@ if cont_sim == 'yes':
             cell_r_faces_IN, cell_r_faces_EX, cell_r_centers, \
             cell_z_A, cell_r_A_IN, cell_r_A_EX, \
             cell_V, \
-            field_Ci_n, field_T_n, field_BET_cat = mf.interpolate_to_new_mesh(l_tube, r_tube, 
-                                                                              cells_ax_old, cells_rad_old, cells_ax, cells_rad,
-                                                                              field_Ci_n, field_T_n, field_BET_cat)
-
+            field_Ci_n, field_T_n, field_BET_cat, \
+            T_wall_n, T_hfluid_n = mf.interpolate_to_new_mesh(l_tube, r_tube, 
+                                                                cells_ax_old, cells_rad_old, cells_ax, cells_rad,
+                                                                field_Ci_n, field_T_n, field_BET_cat, T_wall_n, T_hfluid_n)
+    
     # --- Get and prepare inlet/outlet values
     v_in_n, v_out_n, field_v, \
         p_in_n, p_out_n, field_p, \
@@ -461,7 +460,8 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
     # --- Simulation setup file write - future writing
     # List of name keys for file writing
     names = ['simulation type', 't', 'iteration', 'residuals', \
-             'C in', 'W/F in', 'T in', 'T wall', 'Q in', 'Q out', 'm in', 'm out',\
+             'C in', 'W/F in', 'T in', 'T wall', 'T heating fluid', 'T in hfluid', 'm in hfluid', 'p in hfluid', \
+             'Q in', 'Q out', 'm in', 'm out',\
              'v in', 'v out', 'v', 'p in', 'p out', 'p', \
              'CH3OH', 'H2O', 'H2', 'CO2', 'CO',\
              'T', 'BET',\
@@ -469,7 +469,8 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
        
     # Small function that updates writing values
     steady_value_list = lambda : [sim_type, t_abs, 0, iteration,\
-              C_in_n, WF_in_n, T_in_n, T_wall_n, Q_in_n, Q_out_n, m_inlet, m_outlet,\
+              C_in_n, WF_in_n, T_in_n, T_wall_n, T_hfluid_n, gv.Twall_func.T_in_fgas_steady, gv.Twall_func.m_in_fgas_steady, gv.Twall_func.p_in_fgas_steady,\
+              Q_in_n, Q_out_n, m_inlet, m_outlet,\
               v_in_n, v_out_n, field_v, p_in_n, p_out_n, field_p, \
               np.asarray(field_Ci_n1[0]), np.asarray(field_Ci_n1[1]), np.asarray(field_Ci_n1[2]), np.asarray(field_Ci_n1[3]), np.asarray(field_Ci_n1[4]),\
               field_T_n1, field_BET_cat,\
@@ -513,7 +514,7 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
         # From fluxes at n and n+1, get timestep n+1
         field_Ci_n1 = field_Ci_n + C_fluxes_CN  * field_relax
         field_T_n1 = field_T_n + T_fluxes_CN * field_relax
-        
+
         # Calculate residuals - use largest absolte T flux
         residuals = np.max(abs(T_fluxes_CN))
         
@@ -565,7 +566,7 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
     MSR_rate, MD_rate, WGS_rate, CH3OH_rate, H2O_rate, H2_rate, CO2_rate, CO_rate = mf.get_rate_fields(field_Ci_n1, field_T_n1, field_p, field_BET_cat,
                                                                                                 pi_limit)
     # Get Wall temperature profile
-    T_wall_n = gv.Twall_func.steady(T_wall_n, field_Ci_n[:,0,:], field_T_n[0,:], field_v)
+    T_wall_n, T_hfluid_n = gv.Twall_func.steady(T_wall_n, field_Ci_n[:,0,:], field_T_n[0,:], field_v, T_hfluid_n)
 
     # Get mass flows at inlet and outlet
     m_inlet, m_outlet = mf.get_mass_flow(v_in_n, v_out_n, r_tube, C_in_n, field_Ci_n1)
@@ -603,14 +604,16 @@ if sim_type == 'dynamic':
     # --- Simulation setup file write - future writing
     # List of name keys for file writing
     names = ['simulation type', 't', 'dt', \
-             'C in', 'W/F in', 'T in', 'I', 'T wall', 'Q in', 'Q out', 'm in', 'm out',\
+             'C in', 'W/F in', 'T in', 'I', 'T wall', 'T hfluid', 'T in hfluid', 'm in hfluid', 'p in hfluid',\
+             'Q in', 'Q out', 'm in', 'm out',\
              'v in', 'v out', 'v', 'p in', 'p out', 'p', \
              'CH3OH', 'H2O', 'H2', 'CO2', 'CO',\
              'T', 'BET',\
              'rate MSR', 'rate MD', 'rate WGS', 'rate CH3OH', 'rate H2O', 'rate H2', 'rate CO2', 'rate CO'] 
     
     dynamic_value_list = lambda : [sim_type, round(t_abs,7), dt,\
-              C_in_n, WF_in_n, T_in_n, gv.Twall_func.I_func(t_abs), T_wall_n, Q_in_n, Q_out_n, m_inlet, m_outlet,\
+              C_in_n, WF_in_n, T_in_n, gv.Twall_func.I_func(t_abs), T_wall_n, T_hfluid_n, gv.Twall_func.T_in_fgas_func(t_abs), gv.Twall_func.m_in_fgas_func(t_abs), gv.Twall_func.p_in_fgas_func(t_abs),\
+              Q_in_n, Q_out_n, m_inlet, m_outlet,\
               v_in_n, v_out_n, field_v, p_in_n, p_out_n, field_p, \
               np.asarray(field_Ci_n[0]), np.asarray(field_Ci_n[1]), np.asarray(field_Ci_n[2]), np.asarray(field_Ci_n[3]), np.asarray(field_Ci_n[4]),\
               field_T_n, field_BET_cat,\
@@ -671,7 +674,7 @@ if sim_type == 'dynamic':
             Ci_fluxes, T_fluxes = mf.RK4_fluxes(RK_dt, RK_times, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_centers,
                 dz_mgrid, dr_mgrid, z_centers_mgrid, r_centers_mgrid,
                 W_cat, SC_ratio, r_tube,
-                T_wall_n, RK_T_in, RK_WF_in, RK_p_ref, p_set_pos,
+                T_wall_n, T_hfluid_n, RK_T_in, RK_WF_in, RK_p_ref, p_set_pos,
                 field_Ci_n, field_T_n,
                 rho_cat_bulk, field_BET_cat, d_cat_part, cat_cp, cat_shape, d_tube_in, l_tube,
                 epsilon, N, pi_limit, nu_i, nu_j, adv_index, diff_index)
@@ -687,7 +690,7 @@ if sim_type == 'dynamic':
             
             # Update the temperature field
             field_T_n = copy.deepcopy(field_T_n1)
-        
+
             # --- Update values
             # Times
             t_abs += dt # absolute time
@@ -697,7 +700,7 @@ if sim_type == 'dynamic':
             v_in_prev = v_in_n
         
             # Boundary conditions
-            T_wall_n = gv.Twall_func.dynamic(t_rel, dt, T_wall_n, field_Ci_n[:,0,:], field_T_n[0,:], field_v)
+            T_wall_n, T_hfluid_n = gv.Twall_func.dynamic(t_rel, dt, T_wall_n, field_Ci_n[:,0,:], field_T_n[0,:], field_v, T_hfluid_n)
             
             T_in_n = T_in_func(t_rel)
             p_ref_n = p_ref_func(t_rel)
@@ -710,7 +713,7 @@ if sim_type == 'dynamic':
                 Q_in_n, Q_out_n, C_in_n, C_out_n, rho_in_n, rho_out_n, \
                 X_in_n, X_out_n, mu_in_n, mu_out_n = mf.get_IO_velocity_and_pressure(p_ref_n, p_set_pos, T_in_n, WF_in_n, SC_ratio, W_cat, epsilon, r_tube, l_tube, d_cat_part, cell_z_centers)
     
-                    
+
             if v_in_n != v_in_prev: # If velocity changed
             # Calculate new radial diffusion coefficient
                 field_D_er = mf.radial_diffusion_coefficient(field_v, d_cat_part, d_tube_in)
