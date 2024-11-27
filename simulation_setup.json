@@ -15,8 +15,8 @@
 
 
 "numerical parameters":{
-	"number of axial cells [-]": 50,
-	"number of radial cells [-]": 20,
+	"number of axial cells [-]": 100,
+	"number of radial cells [-]": 35,
 	
 	"advection discretization scheme (upwind_1o / upwind_2o)" : "upwind_2o",
 	"diffusion discretization scheme (central_2o / central_4o)" : "central_4o",
@@ -35,9 +35,9 @@
 	"number of baffle plates [-]": 4,
 	"baffle window height as percentage of baffle diameter [-]": 0.25,
 	"number of tubes in baffle window [-]": 2,
-	"tube pitch [m]": 0.05,
+	"tube pitch [m]": 0.07,
 	
-	"reactor tube length [m]": 0.48,
+	"reactor tube length [m]": 1,
 	"single tube inner diameter [m]": 0.032,
 	"single tube wall thickness [m]": 0.001,
 	
@@ -61,7 +61,7 @@
 		"flue gas flow direction (co-current / counter-current)": "co-current",
 		"flue gas inlet temperature [C]": 400,
 		"flue gas inlet pressure [bar]": 1.2,
-		"flue gas mass flow [kg s-1]": 0.015
+		"flue gas mass flow [kg s-1]": 0.006
 	}, 
 	
 	"joule heating parameters":{
@@ -78,13 +78,13 @@
 	"feed steam to carbon ratio [-]": 1.3,
 
 	"reactor pressure [bar]": 1,
-	"position of given reactor pressure (inlet / outlet)": "outlet",
+	"position of given reactor pressure (inlet / outlet)": "inlet",
 
-	"inlet gas temperature [C]": 250,
+	"inlet gas temperature [C]": 160,
 	"initial reactor temperature [C]": 250,
 	
 	"flow rate given with (WF / WHSV)" : "WF",
-	"W_cat/F_CH3OH - catalyst weight per CH3OH molar feed rate [kg s mol-1]": 234,
+	"W_cat/F_CH3OH - catalyst weight per CH3OH molar feed rate [kg s mol-1]": 135,
 	"WHSV - hourly CH3OH molar feed rate per catalyst weight [mol h-1 kg-1]": 30
 },
 
@@ -93,26 +93,24 @@
 
 "simulation parameters":{
 	"continue simulation from file (yes / no)": "no",
-	"continuation dir. in results dir.": "jheating_dyntest",
+	"continuation dir. in results dir.": "fgheating_test",
 	"simulation type (steady / dynamic)": "steady",
 	
 	"steady simulation parameters":{
 		"maximum iterations": 10000000,
 		"convergence criteria": 1e-8,
 		"field underrelaxation factor": 1e-4,
-		"wall underrelaxation factor": 0.1
+		"wall underrelaxation factor": 0.01
 	},
 	
 	"dynamic simulation parameters":{
 		"run a steady simulation first (yes / no)": "yes",
 		"continue to dynamic simulation if convergence is not achieved (yes / no)": "yes",
-		"simulated time duration [s]": 100,
+		"simulated time duration [s]": 1000,
 		"timestep size [s]": 5e-4,
-		"dynamic boundary conditions (yes / no)": "yes"
+		"dynamic boundary conditions (yes / no)": "no"
 	}
 },
-
-
 
 
 
@@ -121,7 +119,7 @@
 "save file parameters":{
 	"show results only in terminal (yes / no)" : "yes",
 	
-	"new results directory name": "jheating_dyntest",
+	"new results directory name": "fgheating_test",
 	"save simulation output .json files (yes / no)": "yes",
 	"save log (yes / no)": "no",
 	
@@ -145,8 +143,6 @@
 
 
 
-
-
 "dynamic boundary conditions": {
 	"use dynamic wall heating (yes / no)": "yes",
 	"dynamic heating parameters":{
@@ -158,7 +154,24 @@
 				[0.002, 	[273, 	273] ]]
 		},
 		
-		"flue gas parameters":{},
+		"flue gas parameters":{
+			"use dynamic temperature inlet (yes / no)":"no",
+			"gas inlet temperature in time (t[s], T_in[C])":[
+			[0, 	400],
+			[5, 	405]],
+			
+			"use dynamic mass flow inlet (yes / no)":"yes",
+			"gas inlet mass flow in time (t[s], m_in[kg s-1])":[
+			[0, 	0.001],
+			[1, 	0.001],
+			[1,		0.003]],
+			
+			"use dynamic pressure inlet (yes / no)":"no",
+			"gas inlet pressure in time (t[s], p_in[bar])":[
+			[0, 	1.2],
+			[5, 	2.2]]
+		},
+		
 		
 		"joule heating parameters":{
 			"current through single tube in time (t[s], I[A])":[
@@ -166,6 +179,7 @@
 				[1, 	90],
 				[1, 	120]]
 		}
+		
 	},
 	
 
@@ -191,5 +205,7 @@
 	]
 
 }
+
+
 
 }

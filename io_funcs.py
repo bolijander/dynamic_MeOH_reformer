@@ -711,9 +711,11 @@ def read_cont_sim_data(cont_data_dir_path):
     
     # Wall temperature
     wall_temp = np.asarray(t_file['T wall'])
+    # Heating fluid temperature
+    temp_hfluid = np.asarray(t_file['T heating fluid'])
     
     # --- Put all variables into a nice list
-    return_list = [t, field_Ci_n, field_T, field_p, field_v, field_BET, wall_temp,\
+    return_list = [t, field_Ci_n, field_T, field_p, field_v, field_BET, wall_temp, temp_hfluid,\
                    SC_ratio, n_tubes, l_tube, d_tube_in, s_tube, rho_tube, h_tube, cp_tube, \
                    N, epsilon, cells_ax, cells_rad,\
                    cat_shape, cat_dimensions, rho_cat, rho_cat_bulk, cat_composition, cat_cp, fresh_cat_BET_area]

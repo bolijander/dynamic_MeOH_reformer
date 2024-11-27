@@ -7,6 +7,7 @@ Created on Fri Oct 20 19:21:52 2023
 import numpy as np
 import math
 from scipy.interpolate import RectBivariateSpline 
+from scipy.interpolate import interp1d
 
 import json
 
@@ -1016,6 +1017,7 @@ def radial_thermal_conductivity(u_s, rho_mix_mol, Cm_mix, Cp_mix, d_p, X_i, T_C,
     # Heat transfer coefficient from Mears https://doi.org/10.1016/0021-9517(71)90073-X
     h_t = (0.4 * Re**(1/2) + 0.2*Re**(2/3)) * Pr**0.4 * (1 - epsilon)/epsilon * Lambda_f[0,:]/d_p
     # [W m-2 K-1]
+    
     return Lambda_er, h_t
 
 
@@ -1236,10 +1238,9 @@ def get_IO_velocity_and_pressure(p_ref_n, p_set_pos, T_in_n, WF_in_n, SC_ratio, 
         X_out_n = concentration_to_mole_fraction(C_out_n)
         # Get outlet mixture viscosity
         mu_out_n = gas_mixture_viscosity(X_out_n, T_in_n)
-    
+
     
     field_v = get_velocity_field(v_in_n, v_out_n, l_tube, cell_z_centers)
-    
     
     return v_in_n, v_out_n, field_v, p_in_n, p_out_n, field_p, Q_in_n, Q_out_n, C_in_n, C_out_n, rho_in_n, rho_out_n, X_in_n, X_out_n, mu_in_n, mu_out_n
 
@@ -1774,7 +1775,7 @@ def uniform_mesh(cells_ax, cells_rad, l_tube, r_tube):
 
 def interpolate_to_new_mesh(l_tube, r_tube, 
                             cells_ax_old, cells_rad_old, cells_ax_new, cells_rad_new,
-                            field_Ci_n, field_T_n, field_BET_cat):
+                            field_Ci_n, field_T_n, field_BET_cat, T_wall, T_hfluid):
     """
     Interpolate 2D fields to newly defined mesh
 
@@ -1798,6 +1799,10 @@ def interpolate_to_new_mesh(l_tube, r_tube,
         [C] Temperature field
     field_BET_cat : 2D array
         [m2 kg-1] Field of BET surface area
+    T_wall : 1D array
+        [C] Wall temperature distribution array
+    T_hfluid : 1D array
+        [C] Heating fluid temperature distribution array
 
     Returns
     -------
@@ -1811,9 +1816,17 @@ def interpolate_to_new_mesh(l_tube, r_tube,
             cell_r_faces_IN_old, cell_r_faces_EX_old, cell_r_centers_old, \
             cell_z_A_old, cell_r_A_IN_old, cell_r_A_EX_old, \
             cell_V_old = uniform_mesh(cells_ax_old, cells_rad_old, l_tube, r_tube)
+            
+            
+    # --- Get new mesh info
+    d_z, d_r, cell_z_faces_L, cell_z_faces_R, cell_z_centers, \
+            cell_r_faces_IN, cell_r_faces_EX, cell_r_centers, \
+            cell_z_A, cell_r_A_IN, cell_r_A_EX, \
+            cell_V = uniform_mesh(cells_ax_new, cells_rad_new, l_tube, r_tube)
     
     
-    # --- Make interpolation functions
+    # --- 2D interpolation
+    # Interpolation functions
     func_T          = RectBivariateSpline(np.flip(cell_r_centers_old), cell_z_centers_old, field_T_n)
     func_BET        = RectBivariateSpline(np.flip(cell_r_centers_old), cell_z_centers_old, field_BET_cat)
     func_CH3OH      = RectBivariateSpline(np.flip(cell_r_centers_old), cell_z_centers_old, field_Ci_n[0])
@@ -1822,15 +1835,7 @@ def interpolate_to_new_mesh(l_tube, r_tube,
     func_CO2        = RectBivariateSpline(np.flip(cell_r_centers_old), cell_z_centers_old, field_Ci_n[3])
     func_CO         = RectBivariateSpline(np.flip(cell_r_centers_old), cell_z_centers_old, field_Ci_n[4])
     
-    
-    # --- Get new mesh
-    d_z, d_r, cell_z_faces_L, cell_z_faces_R, cell_z_centers, \
-            cell_r_faces_IN, cell_r_faces_EX, cell_r_centers, \
-            cell_z_A, cell_r_A_IN, cell_r_A_EX, \
-            cell_V = uniform_mesh(cells_ax_new, cells_rad_new, l_tube, r_tube)
-    
-    
-    # --- Interpolation - get new values
+    # Interpolation - get new values
     field_T_n       = func_T(np.flip(cell_r_centers), cell_z_centers)
     field_BET_cat   = func_BET(np.flip(cell_r_centers), cell_z_centers)
     field_CH3OH     = func_CH3OH(np.flip(cell_r_centers), cell_z_centers)
@@ -1845,12 +1850,24 @@ def interpolate_to_new_mesh(l_tube, r_tube,
     field_Ci_n = np.swapaxes(field_Ci_n, 1, 2)
     field_Ci_n = np.swapaxes(field_Ci_n, 0, 1)
     
+    
+    # --- 1D interpolation (for wall and heating fluid arrays)
+    # Wall array
+    func_Twall = interp1d(cell_z_centers_old, T_wall) # fuction 
+    T_wall = func_Twall(cell_z_centers) # interpolation
+    # Heating fluid array
+    if type(T_hfluid) is not str: # Only do this interpolation if we have a heating fluid here. If we're not using it, the value be in string format saying something like 'n/a'
+        func_Thfluid = interp1d(cell_z_centers_old, T_hfluid) # function
+        T_hfluid = func_Thfluid(cell_z_centers) # interpolation
+        
+    
     # Make a return list and return
     return_list = [d_z, d_r, cell_z_faces_L, cell_z_faces_R, cell_z_centers, \
             cell_r_faces_IN, cell_r_faces_EX, cell_r_centers, \
             cell_z_A, cell_r_A_IN, cell_r_A_EX, \
             cell_V, \
-            field_Ci_n, field_T_n, field_BET_cat]
+            field_Ci_n, field_T_n, field_BET_cat, T_wall, T_hfluid]
+        
     
     return return_list
 
@@ -2318,7 +2335,7 @@ def get_neighbour_fields(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wal
 def RK4_fluxes(dt_RK4, times_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_centers,
         dz_mgrid, dr_mgrid, z_centers_mgrid, r_centers_mgrid,
         W_cat, SC_ratio, r_tube, 
-        T_wall_RK4, T_in_RK4, WF_in_RK4, p_in_RK4, p_set_pos,
+        T_wall_RK4, T_hfluid_RK4, T_in_RK4, WF_in_RK4, p_ref_RK4, p_set_pos,
         field_Ci, field_T,
         bulk_rho_c, BET_cat_P, d_cat_part, cat_cp, cat_shape,
         d_tube_in, l_tube,
@@ -2365,7 +2382,7 @@ def RK4_fluxes(dt_RK4, times_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, c
         [C] Inlet fluid temperature at RK4 times
     WF_in_RK : 1D array
         [kg s mol-1] Catalyst weight per methanol molar flow rate at RK4 times
-    p_in_RK4 : 1D array
+    p_ref_RK4 : 1D array
        [Pa] Inlet fluid velocity at RK4 times
     p_set_pos : str
        (inlet / outlet) : Position at which pressure is given
@@ -2423,24 +2440,22 @@ def RK4_fluxes(dt_RK4, times_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, c
     # Some things are already set/calculated for the first flux
     # They are: pressure field, D_er, inlet velocity, ghost cell values
     for RKt in range(1): # do this just to keep syntax the same
-        p_set_pos = 'outlet'
         # Get inlet/outlet/field velocities and pressures, and some other variables 
         v_in_RK, v_out_RK, field_v_RK, \
             p_in_RK, p_out_RK, field_p, \
             Q_in_RK, Q_out_RK, C_in_RK, C_out_RK, rho_in_RK, rho_out_RK, \
-            X_in_RK, X_out_RK, mu_in_RK, mu_out_RK = get_IO_velocity_and_pressure(p_in_RK4[RKt], p_set_pos, T_in_RK4[RKt], WF_in_RK4[RKt], SC_ratio, W_cat, epsilon, r_tube, l_tube, d_cat_part, cell_z_centers)
+            X_in_RK, X_out_RK, mu_in_RK, mu_out_RK = get_IO_velocity_and_pressure(p_ref_RK4[RKt], p_set_pos, T_in_RK4[RKt], WF_in_RK4[RKt], SC_ratio, W_cat, epsilon, r_tube, l_tube, d_cat_part, cell_z_centers)
         # Radial diffusion coefficient
         D_er_RK = radial_diffusion_coefficient(field_v_RK, d_cat_part, d_tube_in)
-        
         # Calculate wall temperature profile
-        T_wall_RK4 = gv.Twall_func.dynamic(times_RK4[RKt], dt_RK4[RKt], T_wall_RK4, C_array[:,0,:], T_array[0,:], field_v_RK)
+        T_wall_RK4, T_hfluid_RK4 = gv.Twall_func.dynamic(times_RK4[RKt], dt_RK4[RKt], T_wall_RK4, C_array[:,0,:], T_array[0,:], field_v_RK, T_hfluid_RK4)
         
         # Get neighbouring cell fields                
         field_C_W, field_C_WW, field_C_E, \
             field_C_EX, field_C_EXX, field_C_IN, field_C_INN, \
             field_T_W, field_T_WW, field_T_E, \
                 field_T_EX, field_T_EXX, field_T_IN, field_T_INN = get_neighbour_fields(C_array, T_array, cells_rad, C_in_RK, T_in_RK4[RKt], T_wall_RK4)
-                
+        
         # Calculate flux
         C_flux_arrays[RKt], T_flux_arrays[RKt] = Euler_fluxes(D_er_RK, field_v_RK, field_p,
             dz_mgrid, dr_mgrid, cell_V, r_centers_mgrid,
@@ -2462,12 +2477,12 @@ def RK4_fluxes(dt_RK4, times_RK4, cells_rad, cells_ax, cell_V, cell_r_centers, c
         v_in_RK, v_out_RK, field_v_RK, \
             p_in_RK, p_out_RK, field_p, \
             Q_in_RK, Q_out_RK, C_in_RK, C_out_n, rho_in_RK, rho_out_RK, \
-            X_in_RK, X_out_RK, mu_in_RK, mu_out_RK = get_IO_velocity_and_pressure(p_in_RK4[RKt], p_set_pos, T_in_RK4[RKt], WF_in_RK4[RKt], SC_ratio, W_cat, epsilon, r_tube, l_tube, d_cat_part, cell_z_centers)
+            X_in_RK, X_out_RK, mu_in_RK, mu_out_RK = get_IO_velocity_and_pressure(p_ref_RK4[RKt], p_set_pos, T_in_RK4[RKt], WF_in_RK4[RKt], SC_ratio, W_cat, epsilon, r_tube, l_tube, d_cat_part, cell_z_centers)
         # Calculate new radial diffusion coefficient
         D_er_RK = radial_diffusion_coefficient(field_v_RK, d_cat_part, d_tube_in)
 
         # Calculate wall temperature profile
-        T_wall_RK4 = gv.Twall_func.dynamic(times_RK4[RKt], dt_RK4[RKt], T_wall_RK4, C_array[:,0,:], T_array[0,:], field_v_RK)
+        T_wall_RK4, T_hfluid_RK4 = gv.Twall_func.dynamic(times_RK4[RKt], dt_RK4[RKt], T_wall_RK4, C_array[:,0,:], T_array[0,:], field_v_RK, T_hfluid_RK4)
         
         # Get fields of neighbouring cells                 
         field_C_W, field_C_WW, field_C_E, \
@@ -2903,12 +2918,6 @@ def steady_Euler_fluxes(D_er, v_n, p_P,
     heat_source_i = heat_source_i 
     # Heat flux for time stepping (dT / dt)
     heat_flux = (heat_adv_i + heat_diff_i + heat_source_i) / (Cm_mix * rho_mix_mol) #/ (epsilon * rho_mix_mol * Cm_mix + bulk_rho_c * cat_cp)
-    # heat_flux = (heat_adv_i + heat_diff_i + heat_source_i) / (epsilon * rho_mix_mol * Cm_mix + bulk_rho_c * cat_cp)
-    # heat_flux = (heat_adv_i + heat_diff_i + heat_source_i)
-    # print(np.max(r_R))
-    # print(np.min(r_D))
-    # print(np.min(r_W))
-    # print(heat_flux)
 
 
     return mass_flux, heat_flux
@@ -3022,7 +3031,7 @@ def T_wall_second_derivative(T_P, dz):
 
 def flue_gas_first_derivative(T_P, dz, inlet_value, flow_direction):
     """
-    Calculates first derivatives of flue gas temperature array with 2nd order advection scheme
+    Calculates first derivatives of flue gas temperature array with 2nd order upwind scheme
 
     Parameters
     ----------
@@ -3051,12 +3060,22 @@ def flue_gas_first_derivative(T_P, dz, inlet_value, flow_direction):
     T_WW = np.roll(T_W, 1)
     T_WW[0] = T_WW[1] # Westmost boundary
     
-    # Calculate first derivative
+    # T_E = np.roll(T_P, -1)
+    # T_E[-1] = T_E[-2] # Eastmost boundary
+    # T_EE = np.roll(T_E,-1)
+    # T_EE[-1] = T_EE[2] # Eastmost boundary
+    
+    
+    
+    # Calculate first derivative (upwind)
     d_T_fgas = ( (3*T_P -4*T_W + T_WW) / (dz*2) )
+    
+    # First derivative CO
+    # d_T_fgas = (-T_EE + 8*T_E - 8*T_W + T_WW)/(12*dz)
     
     # Flip the array back (if necessary)
     d_T_fgas = (0.5+flow_direction*0.5)*d_T_fgas + (0.5-flow_direction*0.5)*np.flip(d_T_fgas)
-
+    
     return d_T_fgas
 
 
@@ -3655,13 +3674,15 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
         
         # --- Calculate some geometric variables
         d_tube_out = d_tube_in_fgas + s_tube_fgas*2
+        C_tube_out = np.pi * (d_tube_out/2)**2 # Circumference 
+        A_tube_out_dz = C_tube_out*dz
         if d_tube_out >= p_t: # Make a quick check regarding the physicality 
             raise ValueError('Non physical reactor dimensions received: tube pitch must be larger than reactor tube outer diameter!')
-        d_lm = log_mean_diameter(d_tube_out, d_tube_in_fgas) # [m] Log mean diameter of reactor tube
-        BS_l = material_props['reactor tube length [m]'] / (N_bp+1) # Baffle spacing
+        l_baf = material_props['reactor tube length [m]'] / (N_bp+1) # Baffle spacing
         f_bw = baffle_window_area_fraction(d_shell, BS_op) # [-] Area fraction of baffle window opening
         A_bw = f_bw*(np.pi * d_shell**2 / 4) - N_t_bw*(np.pi * d_tube_out**2 / 4) # [m2] Area in baffle window available for flue gas flow (area of window - cross section area of all tubes in baffle window)
-        A_pe = BS_l * d_shell * (1- d_tube_out/p_t) # Interstitial area available for crossflow perpendicular to the bank of tubes at te widest point in the shell
+        A_pe = l_baf * d_shell * (p_t- d_tube_out)/p_t  # Interstitial area available for crossflow perpendicular to the bank of tubes at te widest point in the shell
+        
         
         # --- flue gas flow direction
         if fgas_flowdir.lower() == 'co-current': # Convert the flow direction input to a +/- factor that we'll use in the equations
@@ -3677,6 +3698,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
             
             def Cp_fgas_mixture(T): # Define a function of flue gas mixture Cp dependant on temperature
                 Cp_mixture = (0.095*CO2.Cm_i(T)/CO2.mol_mass + 0.19*H2O.Cm_i(T)/H2O.mol_mass + 0.715*N2.Cm_i(T)/N2.mol_mass ) * 1000
+                # [J kg-1 K-1]
                 return Cp_mixture 
             #Indices and molar fractions of corresponding indices needed to calculate thermal conductivity of gas mixture
             reg_class_indices = np.asarray([1,3,5]) # 0=CH3OH, 1=H2O, 2=H2, 3=CO2, 4=CO, 5=N2
@@ -3693,24 +3715,30 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
             rho_fgas = (p_in_fgas *1e5)/(R * (T+273.15)) * Mw_fgas*1e-3 # Ideal gas law for flue gas density
             return rho_fgas # [kg m-3]
         
+        
+        # Ratio of heat transfer area to flue gas volume (needed for radial heat flux from flue gas)
+        A_V_ratio = (d_tube_out * N_t * 4) / (d_shell**2 - N_t * d_tube_out**2) # [m-1]
+        
+        # hydraulic diameter (shell side equivalent diameter) for 60 degrees triangular pitch
+        D_h = 1.1/d_tube_out * (p_t**2 - 0.917*d_tube_out**2)
+        
         # Flue gas flow 
         Q_fgas = m_fgas / rho_fgas(T_in_fgas) # [m3 s-1] Volumetric flow of flue gas
-        u_s_fgas = Q_fgas/A_pe # [m s-1] superficial velocity of flue gas
-        # u_s_fgas = np.sqrt((Q_fgas/A_pe)*(Q_fgas/A_bw)) # [m s-1] superficial velocity of flue gas
+        u_s_fgas = Q_fgas/A_pe # [m s-1] inlet superficial velocity of flue gas
         # !!! Note - superficial velocity will  change if we stop using constant pressure at some point
-        # Also check if i need to calculate superficial velocity based on both openinngs (A_pe and A_bw) like i do for mass velocity below
         
-        # Mass velocities
-        G_p = m_fgas / A_pe # [kg m-2 s-1] # mass velocity for crossflow perpendicular to the tubes
-        G_b = m_fgas / A_bw # [kg m-2 s-1] Mass velocity through the baffle window
-        G_e = np.sqrt(G_b * G_p) # [kg m-2 s-1] Mass velocity of gas mixture
+        
         # --- heat transfer coefficient through the tube wall
+        # d_lm = log_mean_diameter(d_tube_out, d_tube_in_fgas) # [m] Log mean diameter of reactor tube
         # [W-1 m2 K] It's in this form because i combine it with h_shell into Uw in the function below
-        h_wall = (s_tube_fgas/k_tube_fgas) * (d_tube_in_fgas/d_lm)
+        # h_wall = (s_tube_fgas/k_tube_fgas) * (d_tube_in_fgas/d_lm)
+        # I disregard the heat transfer coefficient through tube wall because its much higher than h_t and h_s, I also assume radially uniform temperature in the wall
         
-        def gas_to_wall_Uw(T_fgas):
+        
+        def gas_to_wall_h_s(T_fgas, u_s_fgas):
             """
-            Calculate heat transfer coefficient from flue gas to tube wall inner edge
+            Calculate heat transfer coefficient from flue gas to tube wall inner edge according to modified Donohue equation
+            Source book: Chemical Engineering Design - Principles, Practice and Economics of Pland and Process Design, 2nd edition by Gavin Towler and Ray Sinnott (0)
 
             Parameters
             ----------
@@ -3725,7 +3753,6 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
                 [W m-2 K-1] Combined heat transfer coefficient
 
             """
-            
             # --- First get some flue gas properties that are dependant on temperature
             # Get flue gas viscosity
             mu_fgas = flue_gas_viscosity(X_i_fgas, reg_class_indices, T_fgas)
@@ -3734,19 +3761,30 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
             # Get flue gas thermal capacity
             Cp_fgas = Cp_fgas_mixture(T_fgas)
             
-            # Donohue equation - get heat transfer coefficient in the shell side film of a shell-tube heat exchanger
-            h_s = 0.2*(d_tube_out * G_e / mu_fgas)**(0.6) * (Cp_fgas * mu_fgas / k_fgas)**(0.33) * (k_fgas / d_tube_out)
+            # Reynolds number
+            Re = u_s_fgas * rho_fgas(T_fgas) * D_h / mu_fgas
+            # Prandtl number
+            Pr = (Cp_fgas * mu_fgas / k_fgas)
             
+            # Shell side heat-transfer factor (Fig. 19.29 on page 1087) 
+            # This value is read from a graph, which depends on Reynolds number and baffle opening 
+            j_h = 2* 10e-2
+            # j_h = 0.33
+            # j_h = 1
+            
+            # Modified Donohue equation - get heat transfer coefficient in the shell side film of a shell-tube heat exchanger
+            h_s = j_h*Re*Pr**0.33 * (k_fgas / D_h)
             # -- Calculate heat transfer coefficient from flue gas to tube wall internal edge
-            Uw = 1 / (h_wall + (d_tube_in_fgas / h_s / d_tube_out) )
-            return h_s, Uw
+            # Uw = 1 / (h_wall + (d_tube_in_fgas / h_s / d_tube_out) )
+            
+            return h_s
         
         
         # --- Twall functions
         
         def T_wall_func_steady(self, T_wall, C_near_wall, T_near_wall, u_s, T_fgas, *args, **kwargs): 
             """
-            Calculates wall temperature from Joule heating
+            Calculates wall temperature from flue gas heating
 
             Parameters
             ----------
@@ -3760,11 +3798,15 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
                 [C] Current temperature array of internal cells adjacent to the wall
             u_s : 1D array
                 [m s-1] Superficial velocity
+            T_fgas : 1D array
+                [C] Flue gas temperature array
 
             Returns
             -------
-            wall_T_profile : 1D array
+            new_T_wall : 1D array
                 [C] Newly calculated wall temperature profile
+            new_T_fgas : 1D array
+                [C] Newly calculated flue gas temperature profile
 
             """
             
@@ -3779,43 +3821,246 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
             Q_ax = d2_T_wall * k_tube_fgas
             
             # -- Tube heating by hot flue gas
-            # First get heat transfer coefficient
-            Uw, h_s = gas_to_wall_Uw(T_fgas) 
-            # [kg s-3 m-1] Heat transfer 'factor' from flue gas to the wall
-            # F_fg_w = 4 * h_s / d_tube_out  # Omitted number of tubes from the equation because this is the heat given to ONE reactor tube
+            # First get heat transfer coefficient from flue gas to wall
+            h_s = gas_to_wall_h_s(T_fgas, u_s_fgas) #* d_tube_out / d_tube_in_fgas 
+            # [kg s-3 m-1] Heat transfer 'factor' from flue gas to the wall: heat_transfer_coeff*reactor_tube_outer_area/reactor_tube_volume
+            # Calculation for only one reactor tube 
             F_fg_w =  ( (4 * d_tube_out * h_s) / (s2_tube_fgas*(2*d_tube_in_fgas + s2_tube_fgas)) )
 
             # -- Heat radially transferred to the reactor [kg s-3 m-1]
-            # # Q rad is the formula for radial heat transfer but we modify it in steady state to extract T_wall
-            # Q_rad = ( (4 * d_tube_in_fgas * ht) / (s2_tube_fgas*(2*d_tube_in_fgas + s2_tube_fgas)) ) * (T_wall - T_near_wall)
-            # 'Factor' for heat transfer from wall to reactor
+            # 'Factor' for heat transfer from wall to reactor: heat_transfer_coeff*reactor_tube_inner_area/reactor_tube_volume
             F_w_r = ( (4 * d_tube_in_fgas * ht) / (s2_tube_fgas*(2*d_tube_in_fgas + s2_tube_fgas)) ) #* (T_wall - T_near_wall)
             
-            # --- New wall delta T 
+            # --- New wall temperature profile
+            # Extract T_wall from the energy equation for reactor tube wall - unrelaxed profile
             wall_T_profile =( (Q_ax + F_w_r*T_near_wall + F_fg_w*T_fgas)/(F_w_r+F_fg_w) ).flatten()
             # Relaxed wall T profile
             new_T_wall = (wall_T_profile*wall_relax + T_wall*(1-wall_relax)).flatten()
             
 
             # --- New flue gas temperature 
-            # First derivative of flue gas temperature
-            d_T_fgas = flue_gas_first_derivative(T_fgas, dz, T_in_fgas, fgas_flowdir)
             # Define the product of Cp and rho because we use it multiple times
             Cp_rho_factor = Cp_fgas_mixture(T_fgas) * rho_fgas(T_fgas)
+            # - advection
+            # First derivative of flue gas temperature
+            d_T_fgas = flue_gas_first_derivative(T_fgas, dz, T_in_fgas, fgas_flowdir)
             # Heat transfer in flue gas due to advection
             Q_fgas_ax = d_T_fgas * u_s_fgas * Cp_rho_factor
             
-            # Radial heat transfer to the reactor tube
-            Q_fgas_rad = N_t* 4 * h_s / d_tube_out * (T_fgas - T_wall) # Number of tubes included here because it's the heat taken away from flue gas by all tubes
-            # Calculate dT for flue gas
-            dT_fgas = (-Q_fgas_ax - Q_fgas_rad.flatten()) / Cp_rho_factor
-            # Calculate new flue gas value
-            new_T_fgas = T_fgas +  dT_fgas * flow_relax
+            # - Radial heat transfer
+            # Heat transfer 'factor' from flue gas to the wall: heat_transfer_coeff*reactor_tube_outer_area*N_t/shell_flow_volume
+            F_rad_fg = (h_s * A_V_ratio) 
+           
+            # ---New flue gas temperature profile
+            # Extract T_fgas from the energy equation for the flue gas - unrelaxed profile
+            fgas_T_profile = -Q_fgas_ax / F_rad_fg + T_wall
+            # Relaxed T_fgas profile
+            new_T_fgas = (fgas_T_profile*wall_relax + T_fgas*(1-wall_relax)).flatten()
             
             return new_T_wall, new_T_fgas
+        
+        
+        ##
+        ## --- Dynamic flue gas functions 
+        ## 
+        # -- Dynamic boundary condition function 
+        if dyn_bc == 'no' or condition == 'no': # If at least one is false, we have a steady flue gas input
+            # Make a lambda function for I that always gives the same value
+            T_in_fgas_func = lambda t : T_in_fgas
+            m_in_fgas_func = lambda t : m_fgas
+            p_in_fgas_func = lambda t : p_in_fgas
 
-        def T_wall_func_dynamic(self, t, dt, T_wall, C_near_wall, T_near_wall, u_s, *args, **kwargs):
-            pass
+        else: # Otherwise make an interpolation function
+            # Read values from dictionary
+            # --- Matrices containing times and variables
+            # Flue gas temperature inlet       
+            if dynamic_heating_params['use dynamic temperature inlet (yes / no)'].lower() == 'yes': # Run a check whether we're using all of these dynamic inputs
+                T_in_fgas_matrix = np.asarray(dynamic_heating_params['gas inlet temperature in time (t[s], T_in[C])'])
+                T_in_fgas_m = T_in_fgas_matrix[:,1] # Extract respective arrays from the matrix
+                time_T_in_fgas = T_in_fgas_matrix[:,0]
+                
+                # Make some checks check
+                if not ( sorted(time_T_in_fgas) == time_T_in_fgas).all(): # Time should be given in ascending order
+                    raise ValueError('In "dynamic boundary conditions", time for flue gas T_inlet should be given in ascending order')
+                    
+                if len(T_in_fgas_m) == 1: # If one element in list 
+                    T_in_fgas_func = lambda t : T_in_fgas_m[0] # Dont bother with interpolation, just return that value
+                else: # If multiple values in list
+                    def T_in_fgas_func(t): 
+                        """
+                        Interpolates inlet temperature of flue gas in time
+            
+                        Parameters
+                        ----------
+                        t : float
+                            [s] time
+            
+                        Returns
+                        -------
+                        T_interp : float
+                            [C] Inlet flue gas temperature in time 
+                        """
+                        T_interp = np.interp(t, time_T_in_fgas, T_in_fgas_m)
+                        return T_interp
+                
+            else:
+                T_in_fgas_func = lambda t : T_in_fgas
+                
+                
+            # Mass flow inlet
+            if dynamic_heating_params['use dynamic mass flow inlet (yes / no)'].lower() == 'yes':
+                m_in_fgas_matrix = np.asarray(dynamic_heating_params['gas inlet mass flow in time (t[s], m_in[kg s-1])'])
+                m_in_fgas_m = m_in_fgas_matrix[:,1]
+                time_m_in_fgas = m_in_fgas_matrix[:,0]
+                
+                if not ( sorted(time_m_in_fgas) == time_m_in_fgas).all(): # Time should be given in ascending order
+                    raise ValueError('In "dynamic boundary conditions", time flue gas mass inlet should be given in ascending order')
+                    
+                if len(m_in_fgas_m) == 1: # If one element in list 
+                    m_in_fgas_func = lambda t : m_in_fgas_m[0] # Dont bother with interpolation, just return that value
+                else: # If multiple values in list
+                    def m_in_fgas_func(t): 
+                        """
+                        Interpolates mass flow of flue gas in time
+            
+                        Parameters
+                        ----------
+                        t : float
+                            [s] time
+            
+                        Returns
+                        -------
+                        m_interp : float
+                            [kg s-1] Inlet flue gas mass flow 
+                        """
+                        m_interp = np.interp(t, time_m_in_fgas, m_in_fgas_m)
+                        return m_interp
+            else:
+                m_in_fgas_func = lambda t : m_fgas
+                
+            # pressure flue gas inlet
+            if dynamic_heating_params['use dynamic pressure inlet (yes / no)'].lower() == 'yes':
+                p_in_fgas_matrix = np.asarray(dynamic_heating_params['gas inlet pressure in time (t[s], p_in[bar])'])
+                p_in_fgas_m = p_in_fgas_matrix[:,1]
+                time_p_in_fgas = p_in_fgas_matrix[:,0]
+                
+                if not ( sorted(time_p_in_fgas) == time_p_in_fgas).all(): # Time should be given in ascending order
+                    raise ValueError('In "dynamic boundary conditions", time flue gas mass inlet should be given in ascending order')
+                    
+                if len(p_in_fgas_m) == 1: # If one element in list 
+                    p_in_fgas_func = lambda t : p_in_fgas_m[0] # Dont bother with interpolation, just return that value
+                def p_in_fgas_func(t): 
+                    """
+                    Interpolates inlet pressure of flue gas in time
+        
+                    Parameters
+                    ----------
+                    t : float
+                        [s] time
+        
+                    Returns
+                    -------
+                    p_interp : float
+                        [bar] Inlet pressure of flue gas
+                    """
+                    p_interp = np.interp(t, time_p_in_fgas, p_in_fgas_m)
+                    return p_interp
+            else:
+                p_in_fgas_func = lambda t : p_in_fgas
+            
+            
+        ### - OTHER dynamic flue gas functions 
+        
+        # - Dynamic T wall specific functions
+        def rho_fgas_dyn(T, p_in_fgas_dyn): 
+            # T is in [C]
+            R = 8.31446261815324 # [J K-1 mol-1] Ideal gas constant 
+            rho_fgas = (p_in_fgas_dyn *1e5)/(R * (T+273.15)) * Mw_fgas*1e-3 # Ideal gas law for flue gas density
+            return rho_fgas # [kg m-3]
+        
+        
+        def T_wall_func_dynamic(self, t, dt, T_wall, C_near_wall, T_near_wall, u_s, T_fgas, *args, **kwargs):
+            """
+            Calculates wall temperature from flue gas heating
+
+            Parameters
+            ----------
+            relax : float
+                [-] Underrelaxation factor
+            T_wall : 1D array
+                [C] Current wall temperature profile
+            C_near_wall : 2D array
+                [mol m-3] Current specie sconcentration array of internal cells adjacent to the wall
+            T_near_wall : 1D array
+                [C] Current temperature array of internal cells adjacent to the wall
+            u_s : 1D array
+                [m s-1] Superficial velocity
+            T_fgas : 1D array
+                [C] Flue gas temperature array
+
+            Returns
+            -------
+            new_T_wall : 1D array
+                [C] Newly calculated wall temperature profile
+            new_T_fgas : 1D array
+                [C] Newly calculated flue gas temperature profile
+
+            """
+            
+            
+            # Dynamic input flue gas values
+            T_in_fgas_d = T_in_fgas_func(t)
+            m_fgas_d = m_in_fgas_func(t)
+            p_in_fgas_d = p_in_fgas_func(t)
+            
+            # --- Recalculate flue gas properties based on changing inlet flue gas values
+            rho_fgas_d = rho_fgas_dyn(T_fgas, p_in_fgas_d) # Density
+            Q_fgas_d = m_fgas_d / rho_fgas_d # [m3 s-1] Volumetric flow of flue gas
+            u_s_fgas_d = Q_fgas_d/A_pe # [m s-1] superficial velocity of flue gas
+
+            # --- Reactor wall            
+            C_near_wall = np.rot90(np.reshape(C_near_wall, C_near_wall.shape + (1,)), axes=(1,2))
+            T_wall = np.rot90(np.reshape(T_wall, T_wall.shape+(1,)))
+            T_near_wall = np.rot90(np.reshape(T_near_wall, T_near_wall.shape+(1,)))
+
+            # First get film transfer coefficient
+            ht = heat_transfer_coeff_tube(u_s, self.d_p, T_near_wall, C_near_wall, self.epsilon)
+            
+            d2_T_wall = T_wall_second_derivative(T_wall, dz) # Second derivative along z [K m-2]
+            Q_ax = d2_T_wall * k_tube_fgas
+            
+            # -- Tube heating by hot flue gas
+            # First get heat transfer coefficient from flue gas to wall
+            h_s = gas_to_wall_h_s(T_fgas, u_s_fgas_d) 
+            # [kg s-3 m-1] Heat transferred radially from flue gas to the wall
+            Q_fg_w = ( (4 * d_tube_out * h_s) / (s2_tube_fgas*(2*d_tube_in_fgas + s2_tube_fgas)) ) * (T_fgas - T_wall)  # Omitted number of tubes from the equation because this is the heat given to ONE reactor tube
+            # -- Heat radially transferred from the wall to the reactor [kg s-3 m-1]
+            Q_w_r = ( (4 * d_tube_in_fgas * ht) / (s2_tube_fgas*(2*d_tube_in_fgas + s2_tube_fgas)) ) * (T_wall - T_near_wall)
+            # --- New wall delta T 
+            dT_wall = (Q_ax + Q_fg_w - Q_w_r) / (rho_tube_fgas * cp_tube_fgas)
+            # New wall T profile
+            new_T_wall = (T_wall + dT_wall*dt).flatten()
+
+            # --- New flue gas temperature 
+            # First derivative of flue gas temperature
+            d_T_fgas = flue_gas_first_derivative(T_fgas, dz, T_in_fgas_d, fgas_flowdir)
+            # Define the product of Cp and rho because we use it multiple times
+            Cp_rho_factor = Cp_fgas_mixture(T_fgas) * rho_fgas_d
+            # Heat transfer in flue gas due to advection
+            Q_fgas_ax = d_T_fgas * u_s_fgas_d * Cp_rho_factor
+            
+            # Radial heat transfer to the reactor tube
+            Q_fgas_rad = h_s * A_V_ratio * (T_wall-T_fgas) # Number of tubes included here (in A_V_ratio) because it's the heat taken away from flue gas by all tubes
+            
+            # Calculate dT for flue gas
+            dT_fgas = (-Q_fgas_ax + Q_fgas_rad.flatten()) / Cp_rho_factor
+            # Calculate new flue gas value
+            new_T_fgas = T_fgas +  dT_fgas * dt
+            
+            return new_T_wall, new_T_fgas
+        
+        
+        
         
     class Twall(): # Create an empty class that will contain methods for calculating Twall
         pass 
@@ -3828,6 +4073,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
     gv.Twall_func = Twall()
     
     # --- Define additional variables and functions in class for output file writing
+    
     # Joule heating 
     if heating_choice == 'joule':
         def I_func(self, t):
@@ -3836,16 +4082,39 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
         Twall.I_func = I_func
     else: 
         Twall.I_func = lambda self, t : 'n/a'
+        
     # Flue gas
     if heating_choice == 'flue-gas':
-        Twall.T_fgas = np.ones((n_cells)) * T_in_fgas # Initialize/define the flue gas temperature profile with inlet 
-    else: 
-        Twall.T_fgas = 'n/a'
+        def T_fgas_func(self, t):
+            T = T_in_fgas_func(t)
+            return T
         
-    # !!! A couple things to pass to a class, that i'll use later (at least for file writing)
-    # functions of flue gas inlet: mass flow, temperature, and pressure 
-    # Flue gas composition? maybe 
-    
+        def m_fgas_func(self, t):
+            m = m_in_fgas_func(t)
+            return m
+
+        def p_fgas_func(self, t):
+            p = p_in_fgas_func(t)
+            return p
+        
+        Twall.T_in_fgas_func = T_fgas_func
+        Twall.m_in_fgas_func = m_fgas_func
+        Twall.p_in_fgas_func = p_fgas_func
+        
+        # Steady values 
+        Twall.T_in_fgas_steady = T_in_fgas 
+        Twall.m_in_fgas_steady = m_fgas
+        Twall.p_in_fgas_steady = p_in_fgas 
+        
+    else: 
+        Twall.T_in_fgas_func = lambda self, t: 'n/a'
+        Twall.m_in_fgas_func = lambda self, t: 'n/a'
+        Twall.p_in_fgas_func = lambda self, t: 'n/a'
+        
+        Twall.T_in_fgas_steady = 'n/a'
+        Twall.m_in_fgas_steady = 'n/a'
+        Twall.p_in_fgas_steady = 'n/a' 
+        
     return heating_choice
 
 
