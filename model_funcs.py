@@ -3335,9 +3335,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
     dyn_BC = json.load(open(input_json_fname))['dynamic boundary conditions']
     
     # See whether we're using dynamic boundary conditions
-    condition = dyn_BC['use dynamic wall heating (yes / no)'].lower()
-    if condition not in ['yes', 'no']: 
-        raise NameError('Dynamic boundary conditions: dynamic wall heating choice not recognized')
+    condition = bool(dyn_BC['use dynamic wall heating'])
     
     if heating_choice == 'temperature-profile':
 
@@ -3360,7 +3358,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
         
         
         # -- Dynamic boundary condition function 
-        if dyn_bc == 'no' or condition == 'no': # If we're not using dynamic boundary conditions entirely or if we're not using them for wall temp
+        if not dyn_bc or not condition: # If we're not using dynamic boundary conditions entirely or if we're not using them for wall temp
             # If dynamic 
             def T_wall_func_dynamic(self, *args, **kwargs):
                 return wall_T_profile, 'n/a'
@@ -3527,7 +3525,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
         
         
         # -- Dynamic boundary condition function 
-        if dyn_bc == 'no' or condition == 'no': # If at least one is false, we have a steady current
+        if not dyn_bc or not condition: # If at least one is false, we have a steady current
             # Make a lambda function for I that always gives the same value
             I_in_func = lambda t : I_tube_jh
 
@@ -3864,7 +3862,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
         ## --- Dynamic flue gas functions 
         ## 
         # -- Dynamic boundary condition function 
-        if dyn_bc == 'no' or condition == 'no': # If at least one is false, we have a steady flue gas input
+        if not dyn_bc or not condition: # If at least one is false, we have a steady flue gas input
             # Make a lambda function for I that always gives the same value
             T_in_fgas_func = lambda t : T_in_fgas
             m_in_fgas_func = lambda t : m_fgas
@@ -3874,7 +3872,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
             # Read values from dictionary
             # --- Matrices containing times and variables
             # Flue gas temperature inlet       
-            if dynamic_heating_params['use dynamic temperature inlet (yes / no)'].lower() == 'yes': # Run a check whether we're using all of these dynamic inputs
+            if bool(dynamic_heating_params['use dynamic temperature inlet']): # Run a check whether we're using all of these dynamic inputs
                 T_in_fgas_matrix = np.asarray(dynamic_heating_params['gas inlet temperature in time (t[s], T_in[C])'])
                 T_in_fgas_m = T_in_fgas_matrix[:,1] # Extract respective arrays from the matrix
                 time_T_in_fgas = T_in_fgas_matrix[:,0]
@@ -3908,7 +3906,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
                 
                 
             # Mass flow inlet
-            if dynamic_heating_params['use dynamic mass flow inlet (yes / no)'].lower() == 'yes':
+            if bool(dynamic_heating_params['use dynamic mass flow inlet']):
                 m_in_fgas_matrix = np.asarray(dynamic_heating_params['gas inlet mass flow in time (t[s], m_in[kg s-1])'])
                 m_in_fgas_m = m_in_fgas_matrix[:,1]
                 time_m_in_fgas = m_in_fgas_matrix[:,0]
@@ -3939,7 +3937,7 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
                 m_in_fgas_func = lambda t : m_fgas
                 
             # pressure flue gas inlet
-            if dynamic_heating_params['use dynamic pressure inlet (yes / no)'].lower() == 'yes':
+            if bool(dynamic_heating_params['use dynamic pressure inlet']):
                 p_in_fgas_matrix = np.asarray(dynamic_heating_params['gas inlet pressure in time (t[s], p_in[bar])'])
                 p_in_fgas_m = p_in_fgas_matrix[:,1]
                 time_p_in_fgas = p_in_fgas_matrix[:,0]
