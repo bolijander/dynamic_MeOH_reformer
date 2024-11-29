@@ -154,10 +154,10 @@ nu_j = 1
 # -------------------------------------------------
 
 # Make a directory for our results if needed
-if saving_only_terminal == 'no':
+if not saving_only_terminal:
     path_subdir_results, path_sim_data = io.create_result_dir(results_dir_name, cont_sim, sim_type, saving_timestamp, timestamp)
     
-    if saving_files_in == 'yes': # copy the original json and dynamic BCs if specified
+    if saving_files_in: # copy the original json and dynamic BCs if specified
         io.copy_json(input_json_fname, path_subdir_results)
     
 else:
@@ -167,14 +167,14 @@ else:
 # Get a function that either writes the output json file, or does nothing depending on our choice
 if sim_type == 'steady':
     write_out_json_steady, write_info_json_steady = io.output_write_settings(saving_json_out)
-    write_out_json_dynamic, write_info_json_dynamic = io.output_write_settings('no')
+    write_out_json_dynamic, write_info_json_dynamic = io.output_write_settings(False)
 elif sim_type == 'dynamic':
-    write_out_json_steady, write_info_json_steady = io.output_write_settings('no')
+    write_out_json_steady, write_info_json_steady = io.output_write_settings(False)
     write_out_json_dynamic, write_info_json_dynamic = io.output_write_settings(saving_json_out)
 
 
 # Create a simulation log and if needed 
-logname =  ' log.txt'
+logname =  'log.txt'
 sysexit = io.open_log(saving_log, path_subdir_results, logname, original_stdout)
 
 colw = 50 # Character column width for printing statements
@@ -191,7 +191,7 @@ print('\nSimulation setup file:', input_json_fname)
 p_ref_n = p_ref_n * 1e5 # Convert to Pascal
 
 # --- Read data for simulation continuation
-if cont_sim == 'yes':
+if cont_sim:
     
     # --- Read parameters and fields from .json file
     t_abs, field_Ci_n, field_T_n, field_p, field_v, field_BET_cat, T_wall_n, T_hfluid_n,\
@@ -237,7 +237,7 @@ if cont_sim == 'yes':
 
     
 
-elif cont_sim == 'no':
+elif not cont_sim:
 
     # --- Catalyst parameters
     # Calculate catalyst particle (equivalent) volume and diameter 
@@ -362,13 +362,13 @@ elif sim_type == 'dynamic':
     print('Simulated time duration:'.ljust(colw) +'{0}'.format(t_dur))
     print('Simulation timestep size [s]:'.ljust(colw) +'{0:.2e}\n'.format(dt))
     
-    if dyn_bc == 'yes':
+    if dyn_bc:
         print('# --- Dynamic boundary conditions used in simulation')
         io.check_used_dynamic_BCs(input_json_fname, p_set_pos, colw)
     
-if cont_sim == 'yes':
+if cont_sim:
     print('\n# --- Simulation continued from:'.ljust(colw) + 'results{0}'.format(path_old_sim_data.split('results')[-1].split('sim_data')[0] ))
-    if saving_only_terminal == 'no':
+    if not saving_only_terminal:
         print('Current simulation data path:'.ljust(colw) + 'results{0}'.format(path_subdir_results.split('results')[-1]))
     
     print('Continuing from simulation time:'.ljust(colw) +'{0:.5f} [s]'.format(t_abs))
@@ -452,7 +452,7 @@ z_centers_mgrid, r_centers_mgrid = np.meshgrid(cell_z_centers, cell_r_centers)
 
 converg_flag = False # Flag for recognizing convergence
 
-if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson scheme for steady state 
+if sim_type == 'steady' or dynsim_converge_first: # Crank Nicolson scheme for steady state 
     print('\n=======================================')
     print('******* STEADY SIMULATION START')
     print('=======================================\n')
@@ -460,7 +460,7 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
     # --- Simulation setup file write - future writing
     # List of name keys for file writing
     names = ['simulation type', 't', 'iteration', 'residuals', \
-             'C in', 'W/F in', 'T in', 'T wall', 'T heating fluid', 'T in hfluid', 'm in hfluid', 'p in hfluid', \
+             'C in', 'W/F in', 'T in', 'T wall', 'T hfluid', 'T in hfluid', 'm in hfluid', 'p in hfluid', \
              'Q in', 'Q out', 'm in', 'm out',\
              'v in', 'v out', 'v', 'p in', 'p out', 'p', \
              'CH3OH', 'H2O', 'H2', 'CO2', 'CO',\
@@ -586,7 +586,7 @@ if sim_type == 'steady' or dynsim_converge_first =='yes': # Crank Nicolson schem
 # -------------------------------------------------
 
 # First make a flag for whether to proceed in a time loop or not 
-if dynsim_converge_first == 'yes' and dynsim_cont_converg == 'no' and converg_flag == False:  # If doing auto continuation from steady state
+if dynsim_converge_first and not dynsim_cont_converg and not converg_flag :  # If doing auto continuation from steady state
     # If we're doing steady convergence first AND we said don't proceed if steady state is not converged AND convergence flag is still false:
     avoid_timeloop = True # Make a flag to avoid time loop
 else: 

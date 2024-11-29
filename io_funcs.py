@@ -76,7 +76,7 @@ def simulation_inputs(input_json_fname):
         
     cat_BET_area =  catalyst['BET surface area [m2 kg-1]']
     
-    cat_composition = catalyst['catalyst composition: molar percentage of CuO and ZnO; Al2O3 to balance [-]']
+    cat_composition = catalyst['catalyst composition (molar percentage of CuO and ZnO; Al2O3 to balance [-])']
     if type(cat_composition) != list or len(cat_composition) != 2:
         raise NameError('catalyst composition must be defined by with a list of two parameters - [CuO, ZnO]')
 
@@ -153,16 +153,14 @@ def simulation_inputs(input_json_fname):
         raise NameError('Simulation type not recongized: "{0}"'.format(sim_type))
     
     # Set all simulation variables to None, since not all of them will be defined
-    max_iter = convergence = field_relax = wall_relax = dt = dyn_bc = cont_data_dir_path = save_last_jsons = None
+    max_iter = convergence = field_relax = dt = dyn_bc = cont_data_dir_path = save_last_jsons = None
     dur_time = 0. # It's better for some variables to be 0
     
     # Continue simulation yes/no
-    cont_sim = str(operation['continue simulation from file (yes / no)']).lower()
-    if cont_sim != 'yes' and cont_sim != 'no':
-        raise NameError('Continuation of dynamic simulation not recongized: {0}'.format(cont_sim))
+    cont_sim = bool(saving['continue simulation from existing file'])
     
-    if cont_sim == 'yes':  # If we're continuing a previous simulation
-        cont_dir = str(operation['continuation dir. in results dir.'])
+    if cont_sim:  # If we're continuing a previous simulation
+        cont_dir = str(saving['result directory name'])
         
         # Check if specified result directory exists
         cont_dir_path = os.path.join(solver_dir, 'results', cont_dir) # Directory of continuation file
@@ -212,29 +210,19 @@ def simulation_inputs(input_json_fname):
     
     # if sim_type == 'dynamic':
     params = operation['dynamic simulation parameters']
-    dynsim_converge_first = str(params['run a steady simulation first (yes / no)']).lower()
-    if dynsim_converge_first != 'yes' and dynsim_converge_first != 'no':
-        raise NameError('Unrecognized input given in "start with steady converged solution"')
+    dynsim_converge_first = bool(params['run a steady simulation first'])
         
-    dynsim_cont_convergence = str(params['continue to dynamic simulation if convergence is not achieved (yes / no)']).lower()
-    if dynsim_cont_convergence != 'yes' and dynsim_cont_convergence != 'no':
-        raise NameError('Unrecognized input given in "continue to dynamic simulation if convergence is not achieved"')
+    dynsim_cont_convergence = bool(params['continue to dynamic simulation if convergence is not achieved'])
     
     dur_time = float(params['simulated time duration [s]'])
     dt = float(params['timestep size [s]'])
     
-    dyn_bc = str(params['dynamic boundary conditions (yes / no)']).lower()
-    if dyn_bc != 'yes' and dyn_bc != 'no':
-        raise NameError('Dynamic boundary condition not recongized: {0}'.format(dyn_bc))
+    dyn_bc = bool(params['dynamic boundary conditions'])
     
     
     # --- Save file parameters
-    s_only_terminal = str(saving['show results only in terminal (yes / no)']).lower()
-    if s_only_terminal != 'yes' and s_only_terminal != 'no':
-        s_only_terminal = 'no'
-        print('Showing incorrectly defined (show results only in terminal), saving them anyways...')
-        
-        
+    s_only_terminal = bool(saving['show results only in terminal'])
+    
     # --- When to save and print during the simulations
     # if sim_type == 'dynamic':
     dyn_save_every = saving['dynamic simulation']['save .json every']
@@ -262,38 +250,25 @@ def simulation_inputs(input_json_fname):
             raise NameError('.json saving frequency incorrectly defined: {0}'.format(save_last_jsons)) 
         
     # See whether we're only displaying in terminal    
-    if s_only_terminal == 'yes': # set all saving parameters to 'no' if we only want them to show up in terminal (e.g. for code testing )
+    if s_only_terminal: # set all saving parameters to false if we only want them to show up in terminal (e.g. for code testing )
         s_dir_name = ""
-        s_timestamp = s_json_out = s_log = s_files_in = 'no'
+        s_timestamp = s_json_out = s_log = s_files_in = False
         
     
     else: # If we want to save results 
-        
         # Define continuation directory name
-        if cont_sim == 'yes':
+        if cont_sim:
             s_dir_name = cont_dir # We already defined a name if we're continuing a simulation
         else:
-            s_dir_name = str(saving['new results directory name']) # Read user defined name if we're starting a new sim
+            s_dir_name = str(saving['result directory name']) # Read user defined name if we're starting a new sim
         
-        s_timestamp = str(saving['timestamp in directory name (yes / no)']).lower()
-        if s_timestamp != 'yes' and s_timestamp != 'no':
-            s_timestamp = 'no'
-            print('Timestamp choice incorrectly defined (timestamp in directory name), omitting timestamp...')
+        s_timestamp = bool(saving['timestamp in directory name'])
         
-        s_json_out = str(saving['save simulation output .json files (yes / no)']).lower()
-        if s_json_out != 'yes' and s_json_out != 'no':
-            s_json_out = 'yes'
-            print('.json file saving choice incorrectly defined (save .json simulation file), saving it anyways...')
+        s_json_out = bool(saving['save simulation output .json files'])
         
-        s_log = str(saving['save log (yes / no)']).lower()
-        if s_log != 'yes' and s_log != 'no':
-            s_log = 'yes'
-            print('Log saving incorrectly defined (save log), saving it anyways...')
+        s_log = bool(saving['save log'])
     
-        s_files_in = str(saving['save input files  (yes / no)']).lower()
-        if s_files_in != 'yes' and s_files_in != 'no':
-            s_files_in = 'yes'
-            print('Input file saving incorrectly defined (save input files), saving it anyways...')
+        s_files_in = bool(saving['save input files'])
             
     return_list = [cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bulk, cat_composition, \
                    n_tubes, tube_l, tube_d_in, tube_s, tube_rho, tube_h, tube_cp, T_fluid_in,\
@@ -339,9 +314,9 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
 
     # ----- Wall heating options
     # This one gets special treatment because it has many variables    
-    wall_heating_condition = json.load(open(input_json_fname))['dynamic boundary conditions']['use dynamic wall heating (yes / no)'].lower()
+    wall_heating_condition = bool(json.load(open(input_json_fname))['dynamic boundary conditions']['use dynamic wall heating'])
     
-    if wall_heating_condition == 'yes':
+    if wall_heating_condition:
         
         bc_name_dict = {'temperature-profile':'Wall temperature profile',
                        'flue-gas':'Flue gas',
@@ -358,13 +333,12 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
     # ----- Rest of boundary conditions
     # Read boundary conditions from file 
     dyn_BC = json.load(open(input_json_fname))['dynamic boundary conditions']
-    yn_list = ['yes', 'no'] # List of yes no choices
 
     # List of parameters to read from dynamic boundary condition dictionary
     read_list = [ 
-        'use dynamic inlet temperature (yes / no)',
-        'use dynamic inlet mass flow (yes / no)',
-        'use dynamic pressure (yes / no)'
+        'use dynamic inlet temperature',
+        'use dynamic inlet mass flow',
+        'use dynamic pressure'
         ]
 
     bc_name_list = [
@@ -383,12 +357,9 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
 
 
     for pos in range(len(read_list)):
-        condition = dyn_BC[read_list[pos]].lower()
+        condition = bool(dyn_BC[read_list[pos]])
         
-        if condition not in yn_list:
-            raise NameError('Choice in "dynamic boundary conditions" not recognized for: "{0}"'.format(read_list[pos]))
-            
-        if condition == 'yes':
+        if condition:
             array = np.asarray(dyn_BC[value_keys[pos]])
             times = array[:,0]
             values = array[:,1]
@@ -414,8 +385,8 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
     ----------
     input_json_fname : str
         Input .json file name
-    dyn_bc : string
-        (yes / no) Use dynamic boundary conditions or not 
+    dyn_bc : bool
+        Use dynamic boundary conditions or not 
     Tw_in_const : float
         [T] .json defined constant inlet gas temperature 
     WF_in_const : float
@@ -435,7 +406,7 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
 
     """
     
-    if dyn_bc == 'no': # If not using dynamic BCs, just set all functions to return a steady value
+    if not dyn_bc: # If not using dynamic BCs, just set all functions to return a steady value
         
         # --- Inlet temperature function
         T_in_func = lambda t : T_in_const # Return from .json
@@ -451,16 +422,13 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
         
         # Read boundary conditions from file 
         dyn_BC = json.load(open(input_json_fname))['dynamic boundary conditions']
-        yn_list = ['yes', 'no'] # List of yes no choices
         
         
         # --- Inlet temperature
         # Get condition first
-        condition = dyn_BC['use dynamic inlet temperature (yes / no)'].lower()
-        if condition not in yn_list: 
-            raise NameError('Dynamic boundary conditions: dynamic inlet temperature choice not recognized')
+        condition = bool(dyn_BC['use dynamic inlet temperature'])
         
-        if condition == 'no': # If we're not using this dynamic BC
+        if not condition: # If we're not using this dynamic BC
             # Make a function that just returns the set temperature from .json
             T_in_func = lambda t : T_in_const
             
@@ -510,11 +478,9 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
         
         # --- Inlet feed 
         # Get condition first
-        condition = dyn_BC['use dynamic inlet mass flow (yes / no)'].lower()
-        if condition not in yn_list: 
-            raise NameError('Dynamic boundary conditions: dynamic inlet mass flow choice not recognized')
+        condition = bool(dyn_BC['use dynamic inlet mass flow'])
         
-        if condition == 'no': # If we're not using this dynamic BC
+        if not condition: # If we're not using this dynamic BC
             # Make a function that just returns the set temperature from .json
             WF_in_func = lambda t : WF_in_const 
         
@@ -564,11 +530,9 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
         # --- Pressure time profile
         
         # Get condition first
-        condition = dyn_BC['use dynamic pressure (yes / no)'].lower()
-        if condition not in yn_list: 
-            raise NameError('Dynamic boundary conditions: dynamic pressure choice not recognized')
+        condition = bool(dyn_BC['use dynamic pressure'])
         
-        if condition == 'no': # If we're not using this dynamic BC
+        if not condition: # If we're not using this dynamic BC
             # Make a function that just returns the set temperature from .json
             p_ref_func = lambda t : p_ref_const
         
@@ -712,7 +676,7 @@ def read_cont_sim_data(cont_data_dir_path):
     # Wall temperature
     wall_temp = np.asarray(t_file['T wall'])
     # Heating fluid temperature
-    temp_hfluid = np.asarray(t_file['T heating fluid'])
+    temp_hfluid = np.asarray(t_file['T hfluid'])
     
     # --- Put all variables into a nice list
     return_list = [t, field_Ci_n, field_T, field_p, field_v, field_BET, wall_temp, temp_hfluid,\
@@ -734,12 +698,12 @@ def create_result_dir(userdef_dir_name, continued_sim, sim_type, timestamp_choic
     ----------
     userdef_dir_name : string
         User defined result directory name
-    continued_sim : string
-        (yes / no) Are we continuing the simulation from previous file?
+    continued_sim : bool
+        Are we continuing the simulation from previous file?
     sim_type : string
         (steady / dynamic) Simulation type
-    timestamp_choice : string
-        (yes / no) Do you want timestamp on your (newly created) directory name?
+    timestamp_choice : bool
+        Do you want timestamp on your (newly created) directory name?
     timestamp : string
         Timestamp string
 
@@ -765,14 +729,14 @@ def create_result_dir(userdef_dir_name, continued_sim, sim_type, timestamp_choic
     
     
     # --- Results main directory 
-    if continued_sim == 'no': # If we have a new simulation
+    if not continued_sim: # If we have a new simulation
     
         # Define name of directory
         if userdef_dir_name =="": # If the name is empty, use only timestamp
             result_dir_name = timestamp
         else: # if there is a user defined name, use that
             result_dir_name = userdef_dir_name # If result directory is named by user, use that name
-            if timestamp_choice == 'yes': # Append timestamp if defined so by the user
+            if timestamp_choice: # Append timestamp if defined so by the user
                 result_dir_name = result_dir_name + '_' + timestamp
             
         # Make path to currently specified result directory
@@ -900,7 +864,7 @@ def open_log(log_choice, result_path, logname, original_stdout):
     
     log_path = os.path.join(result_path, logname)
     
-    if log_choice == 'yes': #Log saving options
+    if log_choice: #Log saving options
             
         # if __name__ == '__main__': #dont open new files when this is called by other .py files
         
@@ -1042,7 +1006,7 @@ def output_write_settings(saving_json_out):
 
     """
     
-    if saving_json_out == 'yes':
+    if saving_json_out:
         
         # Some internet magic - class for encoding np.arrays to be suitable for json
         class NumpyArrayEncoder(json.JSONEncoder):
@@ -1149,7 +1113,7 @@ def steady_sim_cleanup(saving_json_out, path_saving_data_dir, allowed_files = 2)
 
     """
     # If there are no jsons outputted, just skip
-    if saving_json_out == 'no':
+    if not saving_json_out:
         return
     
     
