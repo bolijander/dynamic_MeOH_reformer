@@ -1,182 +1,227 @@
 {
-"catalyst parameters":{
-	"catalyst particle shape (sphere / cylinder)": "sphere",
-	"sphere particle diameter [m]": 1.5e-3,
-	"cylinder particle (height, diameter) [m,m]": [1,1],
-	"BET surface area [m2 kg-1]": 102000,
-	"catalyst composition: molar percentage of CuO and ZnO; Al2O3 to balance [-]": [0.4, 0.4], 
+    "catalyst parameters": {
+        "catalyst particle shape (sphere / cylinder)": "sphere",
+        "sphere particle diameter [m]": 1.5e-3,
+        "cylinder particle (height, diameter) [m,m]": [1.5e-3, 1.5e-3],
+        "BET surface area [m2 kg-1]": 102000,
+        "catalyst composition (molar percentage of CuO and ZnO; Al2O3 to balance [-])": [0.4, 0.4],
+
+        "known catalyst density (density / bulk density / both)": "density",
+        "catalyst density [kg m-3]": 1300,
+        "catalyst bulk density [kg m-3]": 1000
+    },
 	
-	"known catalyst density (density / bulk density / both)" : "density",
-	"catalyst density [kg m-3]": 1300,
-	"catalyst bulk density [kg m-3]" : 1000 
-},
-
-
-
-
-"numerical parameters":{
-	"number of axial cells [-]": 130,
-	"number of radial cells [-]": 20,
 	
-	"advection discretization scheme (upwind_1o / upwind_2o)" : "upwind_2o",
-	"diffusion discretization scheme (central_2o / central_4o)" : "central_4o",
+
+    "numerical parameters": {
+        "number of axial cells [-]": 100,
+        "number of radial cells [-]": 25,
+
+        "advection discretization scheme (upwind_1o / upwind_2o / LaxWendroff / BeamWarming)": "upwind_2o",
+        "diffusion discretization scheme (central_2o / central_4o)": "central_4o",
+		"flux limiter (none / minmod / superbee / koren / vanLeer)": "none",
+
+        "CFL number [-]": 0.9,
+        "conversion model partial pressure low limit [Pa]": 10,
+        "specie concentration low limit [mol m-3]": 0
+    },
 	
-	"CFL number [-]": 0.9,
-	"conversion model partial pressure low limit [Pa]": 10,
-	"specie concentration low limit [mol m-3]": 1e-10
-},
-
-
-
-"reactor parameters":{
-	"total number of tubes in the reactor [-]" : 1,
-	"single tube length [m]": 1,
-	"single tube inner diameter [m]": 0.02,
 	
-	"single tube wall thickness [m]": 0.002,
-	"material density [kg m-3]": 7100,
-	"material thermal conductivity [W m-1 K-1]": 11,
-	"material specific heat capacity [J kg-1 K-1]": 460
-},
 
+    "reactor parameters": {
+		"reactor tube length [m]": 1,
+        "single tube inner diameter [m]": 0.02,
+        "single tube wall thickness [m]": 0.005,
 
+        "total number of tubes in the reactor [-]": 5,
+        "reactor shell inner diameter [m]": 0.24,
 
-"reactor heating":{
-	"heating type (temperature-profile / flue-gas / joule)": "joule", 
+        "number of baffle plates [-]": 4,
+        "baffle window height as percentage of baffle diameter [-]": 0.25,
+        "number of tubes in baffle window [-]": 2,
+        "tube pitch [m]": 0.0375,
+
+        "material density [kg m-3]": 7100,
+        "material thermal conductivity [W m-1 K-1]": 11,
+        "material specific heat capacity [J kg-1 K-1]": 460
+    },
 	
-	"temperature profile parameters": {
-		"reactor wall temperature profile [C]": [220, 220],
-		"wall temperature relative axial positions [-]": [0, 1]
-	},
 	
-	"flue gas parameters":{}, 
-	
-	"joule heating parameters":{
-		"current through single tube [A]": 165,
-		"tube material electrical resistivity [ohm m]": 1.4e-6
-	}
-	
-},
 
+    "reactor heating parameters": {
+        "heating type (temperature-profile / flue-gas / joule / steam)": "joule",
 
+        "temperature profile parameters": {
+            "reactor wall temperature profile [C]": [250, 250],
+            "wall temperature relative axial positions [-]": [0, 1]
+        },
 
+        "flue gas parameters": {
+            "flue gas composition (combusted-methane)": "combusted-methane",
+            "flue gas flow direction (co-current / counter-current)": "co-current",
+            "flue gas inlet temperature [C]": 350,
+            "flue gas inlet pressure [bar]": 1.2,
+            "flue gas mass flow [kg s-1]": 0.002
+        },
 
-"field parameters":{
-	"feed steam to carbon ratio [-]": 1.5,
-
-	"reactor pressure [bar]": 5,
-	"position of given reactor pressure (inlet / outlet)": "inlet",
-
-	"inlet gas temperature [C]": 250,
-	"initial reactor temperature [C]": 250,
-	
-	"flow rate given with (WF / WHSV)" : "WF",
-	"W_cat/F_CH3OH - catalyst weight per CH3OH molar feed rate [kg s mol-1]": 150,
-	"WHSV - hourly CH3OH molar feed rate per catalyst weight [mol h-1 kg-1]": 30
-},
-
-
-
-
-"simulation parameters":{
-	"continue simulation from file (yes / no)": "no",
-	"continuation dir. in results dir.": "jheating_dyntest",
-	"simulation type (steady / dynamic)": "steady",
-	
-	"steady simulation parameters":{
-		"maximum iterations": 10000000,
-		"convergence criteria": 1e-8,
-		"field underrelaxation factor": 1e-4,
-		"wall underrelaxation factor": 0.08
-	},
-	
-	"dynamic simulation parameters":{
-		"run a steady simulation first (yes / no)": "yes",
-		"continue to dynamic simulation if convergence is not achieved (yes / no)": "yes",
-		"simulated time duration [s]": 100,
-		"timestep size [s]": 5e-4,
-		"dynamic boundary conditions (yes / no)": "yes"
-	}
-},
-
-
-
-
-
-
-
-"save file parameters":{
-	"show results only in terminal (yes / no)" : "no",
-	
-	"new results directory name": "jheating_dyntest",
-	"save simulation output .json files (yes / no)": "yes",
-	"save log (yes / no)": "no",
-	
-	"steady simulation":{
-	"save .json every x iterations": 2500,
-	"write in terminal every x iterations": 500,
-	"keep last x .json files (int / all)": 1
-	},
-	
-	"dynamic simulation":{
-	"save .json every": 0.5,
-	"frequency saving unit (seconds / timesteps)": "seconds",
-	"write in terminal every x timesteps": 100
-	},
-	
-	"timestamp in directory name (yes / no)": "no",
-	"save input files  (yes / no)": "yes"
-},
-
-
-
-
-
-
-
-"dynamic boundary conditions": {
-	"use dynamic wall heating (yes / no)": "yes",
-	"dynamic heating parameters":{
-		"temperature profile parameters":{
-			"reactor wall temperature profile z relative positions": [0, 1],
-			"reactor wall temperature profile in time (t[s], T_profile[C])":[
-				[0, 	[261, 	261] ],
-				[0.001, 	[261, 	261] ],
-				[0.002, 	[273, 	273] ]]
-		},
+        "joule heating parameters": {
+            "current through single tube [A]": 90,
+            "tube material electrical resistivity [ohm m]": 1.4e-6
+        },
 		
-		"flue gas parameters":{},
-		
-		"joule heating parameters":{
-			"current through single tube in time (t[s], I[A])":[
-				[0, 	90],
-				[1, 	90],
-				[1, 	120]]
+		"steam heating parameters": {
+			"condensation temperature [C]": 220
 		}
-	},
+    },
+	
 	
 
-	"use dynamic inlet temperature (yes / no)": "no",
-	"inlet gas temperature in time (t[s], T_in[C])":[
-		[0, 	250],
-		[5, 	245],
-		[45, 	245]
-	],
+    "flow field parameters": {
+        "feed steam to carbon ratio [-]": 1.5,
 
-	"use dynamic inlet mass flow (yes / no)": "no",
-	"inlet mass flow in time (t[s], W_cat/F_CH3OH[kg s mol-1])":[
-		[0, 	300],
-		[5, 	300],
-		[5, 	200]
-	],
+        "reactor pressure [bar]": 5,
+        "position of given reactor pressure (inlet / outlet)": "inlet",
 
-	"use dynamic pressure (yes / no)": "no",
-	"pressure in time (t[s], p[bar])":[
-		[0, 	2],
-		[10, 	2],
-		[40, 	4]
-	]
+        "inlet feed temperature [C]": 250,
+        "initial reactor temperature [C]": 250,
+		
+		"inlet feed flow rate in one tube": 150,
+		"inlet feed flow rate definition": 0,
+		"inlet feed definition options": [
+			["0:      W_cat / F_CH3OH [kg s mol-1]"],
+			["1:      n_CH3OH [mol s-1]"],
+			["2:      n_CH3OH [kmol h-1]"],
+			["3:      n_mix [mol s-1]"],
+			["4:      n_mix [kmol h-1]"],
+			["5:      m_CH3OH [kg s-1]"],
+			["6:      m_CH3OH [kg h-1]"],
+			["7:      m_mix [kg s-1]"],
+			["8:      m_mix [kg h-1]"],
+			["100:    n_mix (user defined X_i) [mol s-1]"],
+			["101:    m_mix (user defined X_i) [kg s-1]"]],
+		
+		"user defined inlet molar fractions of [CH3OH, H2O, H2, CO2, CO, N2]": [0, 0, 0, 0, 0, 1]
+    },
+	
+	
+
+    "simulation parameters": {
+        "simulation type (steady / dynamic)": "steady",
+
+        "steady simulation parameters": {
+            "maximum iterations": 727000,
+            "convergence criteria": 1e-8,
+            "field underrelaxation factor": 4e-4,
+            "wall underrelaxation factor": 0.1
+        },
+
+        "dynamic simulation parameters": {
+            "run a steady simulation first": false,
+            "continue to dynamic simulation if convergence is not achieved": true,
+            "simulated time duration [s]": 1000,
+            "timestep size [s]": 5e-4,
+            "dynamic boundary conditions": false
+        }
+    },
+	
+	
+
+    "save file parameters": {
+        "show results only in terminal": true,
+
+        "result directory name": "TEST",
+        "continue simulation from existing file": false,
+
+        "save simulation output .json files": true,
+        "save log": false,
+
+        "steady simulation": {
+            "save .json every x iterations": 2500,
+            "write in terminal every x iterations": 100,
+            "keep last x .json files (int / all)": 1
+        },
+
+        "dynamic simulation": {
+            "save .json every": 1,
+            "frequency saving unit (seconds / timesteps)": "seconds",
+            "write in terminal every x timesteps": 100
+        },
+
+        "timestamp in directory name": false,
+        "save input files": true
+    },
+	
+	
+
+    "dynamic boundary conditions": {
+        "use dynamic wall heating": true,
+        "dynamic heating parameters": {
+            "temperature profile parameters": {
+                "reactor wall temperature profile z relative positions": [0, 1],
+                "reactor wall temperature profile in time (t[s], T_profile[C])": [
+                    [0, [261, 261]],
+                    [0.001, [261, 261]],
+                    [0.002, [273, 273]]]
+            },
+
+            "flue gas parameters": {
+                "use dynamic temperature inlet": false,
+                "gas inlet temperature in time (t[s], T_in[C])": [
+                    [0, 400],
+                    [5, 405]],
+
+                "use dynamic mass flow inlet": false,
+                "gas inlet mass flow in time (t[s], m_in[kg s-1])": [
+                    [0, 0.001],
+                    [1, 0.001],
+                    [1, 0.003]],
+
+                "use dynamic pressure inlet": false,
+                "gas inlet pressure in time (t[s], p_in[bar])": [
+                    [0, 1.2],
+                    [5, 2.2]]
+            },
+
+            "joule heating parameters": {
+                "current through single tube in time (t[s], I[A])": [
+                    [0, 10],
+                    [1, 10],
+                    [1, 170]]
+            },
+			
+			"steam heating parameters": {
+				"use dynamic condensation temperature": false,
+				"condensation temperature in time (t[s], T[C])": [
+					[0, 250],
+					[1, 260]]
+			}
+
+        },
+
+        "use dynamic inlet temperature": false,
+        "inlet feed temperature in time (t[s], T_in[C])": [
+            [0, 250],
+            [5, 245],
+            [45, 245]
+        ],
+
+        "use dynamic inlet flow rate": false,
+        "inlet mass flow in time (t[s], inlet_feed[user defined unit])": [
+            [0, 300],
+            [5, 300],
+            [5, 200]
+        ],
+
+        "use dynamic pressure": false,
+        "pressure in time (t[s], p[bar])": [
+            [0, 2],
+            [10, 2],
+            [40, 4]
+        ]
+
+    }
+	
+	
 
 }
 
-}

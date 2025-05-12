@@ -15,6 +15,8 @@ import json
 
 import math
 
+import global_vars as gv
+
 
 
 ''' 
@@ -52,8 +54,9 @@ def simulation_inputs(input_json_fname):
     
     catalyst = file['catalyst parameters']
     reactor = file['reactor parameters']
+    heating = file['reactor heating parameters']
     numerics = file['numerical parameters']
-    field = file['field parameters']
+    field = file['flow field parameters']
     operation = file['simulation parameters']
     saving = file['save file parameters']
     
@@ -75,7 +78,7 @@ def simulation_inputs(input_json_fname):
         
     cat_BET_area =  catalyst['BET surface area [m2 kg-1]']
     
-    cat_composition = catalyst['catalyst composition: molar percentage of CuO and ZnO; Al2O3 to balance [-]']
+    cat_composition = catalyst['catalyst composition (molar percentage of CuO and ZnO; Al2O3 to balance [-])']
     if type(cat_composition) != list or len(cat_composition) != 2:
         raise NameError('catalyst composition must be defined by with a list of two parameters - [CuO, ZnO]')
 
@@ -92,7 +95,7 @@ def simulation_inputs(input_json_fname):
     
     # --- Reactor parameters
     n_tubes = int(reactor['total number of tubes in the reactor [-]'])
-    tube_l = float(reactor['single tube length [m]'])
+    tube_l = float(reactor['reactor tube length [m]'])
     tube_d_in = float(reactor['single tube inner diameter [m]'])
     
     tube_s = float(reactor['single tube wall thickness [m]'])
@@ -100,19 +103,29 @@ def simulation_inputs(input_json_fname):
     tube_h = float(reactor['material thermal conductivity [W m-1 K-1]'])
     tube_cp = float(reactor['material specific heat capacity [J kg-1 K-1]'])
     
+    # --- Reactor heating parameters 
+    heating_choice = str(heating['heating type (temperature-profile / flue-gas / joule / steam)']).lower()
+    if heating_choice == 'flue-gas':
+        T_fluid_in= float(heating['flue gas parameters']['flue gas inlet temperature [C]'])
+    else:
+        T_fluid_in = 0
     
     # --- Numerical parameters
     ax_cells = int(numerics['number of axial cells [-]'])
     rad_cells = int(numerics['number of radial cells [-]'])
     
-    adv_scheme = str(numerics['advection discretization scheme (upwind_1o / upwind_2o)']).lower()
+    adv_scheme = str(numerics['advection discretization scheme (upwind_1o / upwind_2o / LaxWendroff / BeamWarming)']).lower()
     diff_scheme = str(numerics['diffusion discretization scheme (central_2o / central_4o)']).lower()
     
     # Check if we're passing correct choices
-    if adv_scheme != 'upwind_1o' and adv_scheme != 'upwind_2o': 
+    if adv_scheme not in ['upwind_1o', 'upwind_2o', 'laxwendroff', 'beamwarming']: 
         raise NameError('Advection discretization scheme not recognized: {}'.format(adv_scheme))
     if diff_scheme != 'central_2o' and diff_scheme != 'central_4o':
         raise NameError('Diffusion discretization scheme not recognized: {}'.format(diff_scheme))
+        
+    flux_limiter_choice = str(numerics['flux limiter (none / minmod / superbee / koren / vanLeer)']).lower()
+    gv.set_flux_limiter(flux_limiter_choice)
+    gv.set_ratio_of_gradients(adv_scheme)
     
     CFL = float(numerics['CFL number [-]'])
     partP_limit = float(numerics['conversion model partial pressure low limit [Pa]'])
@@ -125,19 +138,17 @@ def simulation_inputs(input_json_fname):
     if p_set_pos != 'inlet' and p_set_pos != 'outlet':
         raise NameError('Given position of reactor pressure not recognized: {}'.format(p_set_pos))
     
-    
-    inlet_gas_T = float(field['inlet gas temperature [C]'])
+    inlet_gas_T = float(field['inlet feed temperature [C]'])
     init_reactor_T = float(field['initial reactor temperature [C]'])
     
-    flow_rate = str(field['flow rate given with (WF / WHSV)']).upper()
-    if flow_rate != 'WF' and flow_rate != 'WHSV':
-        raise NameError('Given known initial flow rate not recongized: {0}'.format(flow_rate))
-        
-    if flow_rate == 'WF':
-        W_F = field['W_cat/F_CH3OH - catalyst weight per CH3OH molar feed rate [kg s mol-1]']
-    elif flow_rate == 'WHSV': 
-        W_F = field['WHSV - hourly CH3OH molar feed rate per catalyst weight [mol h-1 kg-1]']
-        W_F = 1/(W_F / 3600)# get [ kg s mol-1]
+    # inlet flow rate
+    flow_rate = float(field['inlet feed flow rate in one tube'])
+    # Read and set feed flow rate unit/definition in global vars
+    fr_definition = int(field['inlet feed flow rate definition'])
+    gv.set_inlet_flowrate_unit(fr_definition)
+    # Set steam to carbon ratio in the class
+    gv.inletClass.SC_ratio = SC_ratio # [-] Steam to carbon ratio
+    gv.inletClass.my_X_i = np.asarray(field['user defined inlet molar fractions of [CH3OH, H2O, H2, CO2, CO, N2]'])
     
     # --- Simulation type and operation parameters 
     sim_type = str(operation['simulation type (steady / dynamic)']).lower() 
@@ -146,16 +157,14 @@ def simulation_inputs(input_json_fname):
         raise NameError('Simulation type not recongized: "{0}"'.format(sim_type))
     
     # Set all simulation variables to None, since not all of them will be defined
-    max_iter = convergence = field_relax = wall_relax = dt = dyn_bc = cont_data_dir_path = save_last_jsons = None
+    max_iter = convergence = field_relax = dt = dyn_bc = cont_data_dir_path = save_last_jsons = None
     dur_time = 0. # It's better for some variables to be 0
     
     # Continue simulation yes/no
-    cont_sim = str(operation['continue simulation from file (yes / no)']).lower()
-    if cont_sim != 'yes' and cont_sim != 'no':
-        raise NameError('Continuation of dynamic simulation not recongized: {0}'.format(cont_sim))
+    cont_sim = bool(saving['continue simulation from existing file'])
     
-    if cont_sim == 'yes':  # If we're continuing a previous simulation
-        cont_dir = str(operation['continuation dir. in results dir.'])
+    if cont_sim:  # If we're continuing a previous simulation
+        cont_dir = str(saving['result directory name'])
         
         # Check if specified result directory exists
         cont_dir_path = os.path.join(solver_dir, 'results', cont_dir) # Directory of continuation file
@@ -176,16 +185,6 @@ def simulation_inputs(input_json_fname):
         subdirs.sort() # Sort this list 
         cont_subdir_path = os.path.join(cont_dir_path, subdirs[-1]) # Take latest entry in list and make path from it 
                             
-
-        # # Check for simulation_setup .json
-        # cont_jsons = []
-        # for file in os.listdir(cont_subdir_path):
-        #     if file.endswith('.json'):
-        #         cont_jsons.append(file)
-        # if len(cont_jsons) != 1:
-        #     raise NameError('Continuation of dynamic simulation not possible:\nsimulation setup .json file not found in directory {0}'.format(cont_dir))
-        # input_json = os.path.join(cont_subdir_path, cont_jsons[0]) # Path to json
-        
         # Check for sim_data directory
         cont_data_dir_path = os.path.join(cont_subdir_path, 'sim_data')
         if not os.path.exists(cont_data_dir_path):
@@ -215,29 +214,19 @@ def simulation_inputs(input_json_fname):
     
     # if sim_type == 'dynamic':
     params = operation['dynamic simulation parameters']
-    dynsim_converge_first = str(params['run a steady simulation first (yes / no)']).lower()
-    if dynsim_converge_first != 'yes' and dynsim_converge_first != 'no':
-        raise NameError('Unrecognized input given in "start with steady converged solution"')
+    dynsim_converge_first = bool(params['run a steady simulation first'])
         
-    dynsim_cont_convergence = str(params['continue to dynamic simulation if convergence is not achieved (yes / no)']).lower()
-    if dynsim_cont_convergence != 'yes' and dynsim_cont_convergence != 'no':
-        raise NameError('Unrecognized input given in "continue to dynamic simulation if convergence is not achieved"')
+    dynsim_cont_convergence = bool(params['continue to dynamic simulation if convergence is not achieved'])
     
     dur_time = float(params['simulated time duration [s]'])
     dt = float(params['timestep size [s]'])
     
-    dyn_bc = str(params['dynamic boundary conditions (yes / no)']).lower()
-    if dyn_bc != 'yes' and dyn_bc != 'no':
-        raise NameError('Dynamic boundary condition not recongized: {0}'.format(dyn_bc))
+    dyn_bc = bool(params['dynamic boundary conditions'])
     
     
     # --- Save file parameters
-    s_only_terminal = str(saving['show results only in terminal (yes / no)']).lower()
-    if s_only_terminal != 'yes' and s_only_terminal != 'no':
-        s_only_terminal = 'no'
-        print('Showing incorrectly defined (show results only in terminal), saving them anyways...')
-        
-        
+    s_only_terminal = bool(saving['show results only in terminal'])
+    
     # --- When to save and print during the simulations
     # if sim_type == 'dynamic':
     dyn_save_every = saving['dynamic simulation']['save .json every']
@@ -265,43 +254,30 @@ def simulation_inputs(input_json_fname):
             raise NameError('.json saving frequency incorrectly defined: {0}'.format(save_last_jsons)) 
         
     # See whether we're only displaying in terminal    
-    if s_only_terminal == 'yes': # set all saving parameters to 'no' if we only want them to show up in terminal (e.g. for code testing )
+    if s_only_terminal: # set all saving parameters to false if we only want them to show up in terminal (e.g. for code testing )
         s_dir_name = ""
-        s_timestamp = s_json_out = s_log = s_files_in = 'no'
+        s_timestamp = s_json_out = s_log = s_files_in = False
         
     
     else: # If we want to save results 
-        
         # Define continuation directory name
-        if cont_sim == 'yes':
+        if cont_sim:
             s_dir_name = cont_dir # We already defined a name if we're continuing a simulation
         else:
-            s_dir_name = str(saving['new results directory name']) # Read user defined name if we're starting a new sim
+            s_dir_name = str(saving['result directory name']) # Read user defined name if we're starting a new sim
         
-        s_timestamp = str(saving['timestamp in directory name (yes / no)']).lower()
-        if s_timestamp != 'yes' and s_timestamp != 'no':
-            s_timestamp = 'no'
-            print('Timestamp choice incorrectly defined (timestamp in directory name), omitting timestamp...')
+        s_timestamp = bool(saving['timestamp in directory name'])
         
-        s_json_out = str(saving['save simulation output .json files (yes / no)']).lower()
-        if s_json_out != 'yes' and s_json_out != 'no':
-            s_json_out = 'yes'
-            print('.json file saving choice incorrectly defined (save .json simulation file), saving it anyways...')
+        s_json_out = bool(saving['save simulation output .json files'])
         
-        s_log = str(saving['save log (yes / no)']).lower()
-        if s_log != 'yes' and s_log != 'no':
-            s_log = 'yes'
-            print('Log saving incorrectly defined (save log), saving it anyways...')
+        s_log = bool(saving['save log'])
     
-        s_files_in = str(saving['save input files  (yes / no)']).lower()
-        if s_files_in != 'yes' and s_files_in != 'no':
-            s_files_in = 'yes'
-            print('Input file saving incorrectly defined (save input files), saving it anyways...')
+        s_files_in = bool(saving['save input files'])
             
     return_list = [cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bulk, cat_composition, \
-                   n_tubes, tube_l, tube_d_in, tube_s, tube_rho, tube_h, tube_cp,\
+                   n_tubes, tube_l, tube_d_in, tube_s, tube_rho, tube_h, tube_cp, T_fluid_in,\
                    ax_cells, rad_cells, adv_scheme, diff_scheme, CFL, partP_limit, Ci_limit,\
-                   SC_ratio, p_ref, p_set_pos, inlet_gas_T, init_reactor_T, W_F,\
+                   SC_ratio, p_ref, p_set_pos, inlet_gas_T, init_reactor_T, flow_rate,\
                    sim_type, max_iter, convergence, field_relax, dt, dur_time, dyn_bc, cont_sim, cont_data_dir_path,\
                    s_dir_name, s_only_terminal, steady_save_every, dyn_save_every, dynsim_converge_first, dynsim_cont_convergence,\
                    steady_write_every, dyn_write_every, save_last_jsons, s_timestamp, s_json_out, s_log, s_files_in]
@@ -342,9 +318,9 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
 
     # ----- Wall heating options
     # This one gets special treatment because it has many variables    
-    wall_heating_condition = json.load(open(input_json_fname))['dynamic boundary conditions']['use dynamic wall heating (yes / no)'].lower()
+    wall_heating_condition = bool(json.load(open(input_json_fname))['dynamic boundary conditions']['use dynamic wall heating'])
     
-    if wall_heating_condition == 'yes':
+    if wall_heating_condition:
         
         bc_name_dict = {'temperature-profile':'Wall temperature profile',
                        'flue-gas':'Flue gas',
@@ -352,7 +328,7 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
         
         
         # Read what kind of heating we're using
-        heating_choice = json.load(open(input_json_fname))['reactor heating']['heating type (temperature-profile / flue-gas / joule)'].lower()
+        heating_choice = json.load(open(input_json_fname))['reactor heating parameters']['heating type (temperature-profile / flue-gas / joule)'].lower()
 
         print('Dynamic wall heating with {0} used'.format(bc_name_dict[heating_choice].upper()))    
         print('Check input file for details')
@@ -361,17 +337,16 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
     # ----- Rest of boundary conditions
     # Read boundary conditions from file 
     dyn_BC = json.load(open(input_json_fname))['dynamic boundary conditions']
-    yn_list = ['yes', 'no'] # List of yes no choices
 
     # List of parameters to read from dynamic boundary condition dictionary
     read_list = [ 
-        'use dynamic inlet temperature (yes / no)',
-        'use dynamic inlet mass flow (yes / no)',
-        'use dynamic pressure (yes / no)'
+        'use dynamic inlet temperature',
+        'use dynamic inlet flow rate',
+        'use dynamic pressure'
         ]
 
     bc_name_list = [
-        'Inlet gas temperature',
+        'Inlet feed temperature',
         'Inlet mass flow',
         'Pressure at {0}'.format(p_ref_pos.upper())
             ]
@@ -379,19 +354,16 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
     bc_units = ['[C]', '[kg s mol-1]', '[bar]']
 
     value_keys = [
-        'inlet gas temperature in time (t[s], T_in[C])',
-        'inlet mass flow in time (t[s], W_cat/F_CH3OH[kg s mol-1])',
+        'inlet feed temperature in time (t[s], T_in[C])',
+        'inlet mass flow in time (t[s], inlet_feed[user defined unit])',
         'pressure in time (t[s], p[bar])'
         ]
 
 
     for pos in range(len(read_list)):
-        condition = dyn_BC[read_list[pos]].lower()
+        condition = bool(dyn_BC[read_list[pos]])
         
-        if condition not in yn_list:
-            raise NameError('Choice in "dynamic boundary conditions" not recognized for: "{0}"'.format(read_list[pos]))
-            
-        if condition == 'yes':
+        if condition:
             array = np.asarray(dyn_BC[value_keys[pos]])
             times = array[:,0]
             values = array[:,1]
@@ -409,7 +381,7 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
 
 
 
-def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_const):
+def read_and_set_dynamic_BCs(input_json_fname,dyn_bc, T_in_const, flowrate_in_const, p_ref_const):
     """
     Read boundary conditions and define time dependant functions of boundary conditions 
 
@@ -417,12 +389,12 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
     ----------
     input_json_fname : str
         Input .json file name
-    dyn_bc : string
-        (yes / no) Use dynamic boundary conditions or not 
+    dyn_bc : bool
+        Use dynamic boundary conditions or not 
     Tw_in_const : float
         [T] .json defined constant inlet gas temperature 
-    WF_in_const : float
-        [kg s mol-1] Constant inlet methanol molar flow rate 
+    flowrate_in_const : float
+        [] .json defined constant inlet flow rate. Unit defined in .json
     p_ref_const : float
         [Pa] Constant reference pressure 
 
@@ -433,18 +405,18 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
 
     Returns
     -------
-    T_in_func, WF_in_func, p_in_func : functions
+    T_in_func, flowrate_in_func, p_in_func : functions
         Interpolation functions for wall temperature profile, inlet gas temperature, inlet methanol feed, inlet gas pressure
 
     """
     
-    if dyn_bc == 'no': # If not using dynamic BCs, just set all functions to return a steady value
+    if not dyn_bc: # If not using dynamic BCs, just set all functions to return a steady value
         
         # --- Inlet temperature function
         T_in_func = lambda t : T_in_const # Return from .json
         
         # --- Methanol inlet molar flow rate
-        WF_in_func = lambda t : WF_in_const # Return from .json
+        flowrate_in_func = lambda t : flowrate_in_const # Return from .json
         
         # --- Inlet pressure function
         p_ref_func = lambda t : p_ref_const
@@ -454,23 +426,20 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
         
         # Read boundary conditions from file 
         dyn_BC = json.load(open(input_json_fname))['dynamic boundary conditions']
-        yn_list = ['yes', 'no'] # List of yes no choices
         
         
         # --- Inlet temperature
         # Get condition first
-        condition = dyn_BC['use dynamic inlet temperature (yes / no)'].lower()
-        if condition not in yn_list: 
-            raise NameError('Dynamic boundary conditions: dynamic inlet temperature choice not recognized')
+        condition = bool(dyn_BC['use dynamic inlet temperature'])
         
-        if condition == 'no': # If we're not using this dynamic BC
+        if not condition: # If we're not using this dynamic BC
             # Make a function that just returns the set temperature from .json
             T_in_func = lambda t : T_in_const
             
         else: 
             # - Otherwise read values from dictionary
             # Matrix containint times and temperatures
-            Tin_matrix = np.asarray(dyn_BC['inlet gas temperature in time (t[s], T_in[C])'])
+            Tin_matrix = np.asarray(dyn_BC['inlet feed temperature in time (t[s], T_in[C])'])
             # Extract respective arrays from the matrix
             T_in = Tin_matrix[:,1]
             time_T_in = Tin_matrix[:,0]
@@ -513,39 +482,37 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
         
         # --- Inlet feed 
         # Get condition first
-        condition = dyn_BC['use dynamic inlet mass flow (yes / no)'].lower()
-        if condition not in yn_list: 
-            raise NameError('Dynamic boundary conditions: dynamic inlet mass flow choice not recognized')
+        condition = bool(dyn_BC['use dynamic inlet flow rate'])
         
-        if condition == 'no': # If we're not using this dynamic BC
+        if not condition: # If we're not using this dynamic BC
             # Make a function that just returns the set temperature from .json
-            WF_in_func = lambda t : WF_in_const 
+            flowrate_in_func = lambda t : flowrate_in_const 
         
         else: 
             # - Otherwise read values from dictionary
             # Matrix containint times and temperatures
-            WFin_matrix = np.asarray(dyn_BC['inlet mass flow in time (t[s], W_cat/F_CH3OH[kg s mol-1])'])
+            frate_in_matrix = np.asarray(dyn_BC['inlet mass flow in time (t[s], inlet_feed[user defined unit])'])
             # Extract respective arrays from the matrix
-            WF_in = WFin_matrix[:,1]
-            time_WF_in = WFin_matrix[:,0]
+            frate_in = frate_in_matrix[:,1]
+            time_frate_in = frate_in_matrix[:,0]
             
-            if len(WF_in) == 0 or len(time_WF_in) == 0: # If nothing in list(s) 
-                raise ValueError('In "dynamic boundary conditions", there are empty lists in inlet mass flow profiles')
+            if len(frate_in) == 0 or len(time_frate_in) == 0: # If nothing in list(s) 
+                raise ValueError('In "dynamic boundary conditions", there are empty lists in inlet flow rate profiles')
             
-            if len(WF_in) == 1: # If one element in list 
-                WF_in_func = lambda t : WF_in[0] # Dont bother with interpolation, just return that value
+            if len(frate_in) == 1: # If one element in list 
+                flowrate_in_func = lambda t : frate_in[0] # Dont bother with interpolation, just return that value
                 
             else: # If multiple values in list
                     # - First check some things 
-                    if len(time_WF_in) != len(WF_in): # Amount of inlet feeds points should match number of time points
-                        raise ValueError('In "dynamic boundary conditions", length of t_WF_in and WF_in does not match!')
+                    if len(time_frate_in) != len(frate_in): # Amount of inlet feeds points should match number of time points
+                        raise ValueError('In "dynamic boundary conditions", length of t_frate_in and frate_in does not match!')
                         
-                    if not ( sorted(time_WF_in) == time_WF_in).all(): # Time should be given in ascending order
-                        raise ValueError('In "dynamic boundary conditions", t_WF_in should be given in ascending order')
+                    if not ( sorted(time_frate_in) == time_frate_in).all(): # Time should be given in ascending order
+                        raise ValueError('In "dynamic boundary conditions", t_frate_in should be given in ascending order')
                         
-                    def WF_in_func(t): 
+                    def flowrate_in_func(t): 
                         """
-                        Interpolates inlet gas feed (W/F_CH3OH) in time
+                        Interpolates inlet flow rate (unit user defined) in time
             
                         Parameters
                         ----------
@@ -554,24 +521,22 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
             
                         Returns
                         -------
-                        WF_inlet : float
+                        flowrate_inlet : float
                             Inlet feed at time t
                         """
                         
-                        WF_inlet = np.interp(t, time_WF_in, WF_in)
+                        flowrate_inlet = np.interp(t, time_frate_in, frate_in)
                         
-                        return WF_inlet
+                        return flowrate_inlet
         
         
         
         # --- Pressure time profile
         
         # Get condition first
-        condition = dyn_BC['use dynamic pressure (yes / no)'].lower()
-        if condition not in yn_list: 
-            raise NameError('Dynamic boundary conditions: dynamic pressure choice not recognized')
+        condition = bool(dyn_BC['use dynamic pressure'])
         
-        if condition == 'no': # If we're not using this dynamic BC
+        if not condition: # If we're not using this dynamic BC
             # Make a function that just returns the set temperature from .json
             p_ref_func = lambda t : p_ref_const
         
@@ -618,7 +583,7 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
                         return p_reference
 
 
-    return T_in_func, WF_in_func, p_ref_func
+    return T_in_func, flowrate_in_func, p_ref_func
 
 
 
@@ -698,9 +663,10 @@ def read_cont_sim_data(cont_data_dir_path):
     field_H2 = t_file['H2']
     field_CO2 = t_file['CO2']
     field_CO = t_file['CO']
+    field_N2 = t_file['N2']
     
     # Join them in one 3D array
-    field_Ci_n = np.dstack((field_CH3OH, field_H2O, field_H2, field_CO2, field_CO))
+    field_Ci_n = np.dstack((field_CH3OH, field_H2O, field_H2, field_CO2, field_CO, field_N2))
     # Shuffle around the axes to match wanted output
     field_Ci_n = np.swapaxes(field_Ci_n, 1, 2)
     field_Ci_n = np.swapaxes(field_Ci_n, 0, 1)
@@ -714,9 +680,19 @@ def read_cont_sim_data(cont_data_dir_path):
     
     # Wall temperature
     wall_temp = np.asarray(t_file['T wall'])
+    # Heating fluid temperature
+    temp_hfluid = t_file['T hfluid']
+    if not isinstance(temp_hfluid, str): # Convert to nparray if its not a string
+        temp_hfluid = np.asarray(temp_hfluid)
+        
+    # Steam condensate outflow        
+    m_condensate = t_file['m out condensate']
+    if not isinstance(m_condensate, str): # Convert to nparray if its not a string
+        m_condensate = np.asarray(m_condensate)
+    
     
     # --- Put all variables into a nice list
-    return_list = [t, field_Ci_n, field_T, field_p, field_v, field_BET, wall_temp,\
+    return_list = [t, field_Ci_n, field_T, field_p, field_v, field_BET, wall_temp, temp_hfluid, m_condensate,\
                    SC_ratio, n_tubes, l_tube, d_tube_in, s_tube, rho_tube, h_tube, cp_tube, \
                    N, epsilon, cells_ax, cells_rad,\
                    cat_shape, cat_dimensions, rho_cat, rho_cat_bulk, cat_composition, cat_cp, fresh_cat_BET_area]
@@ -735,12 +711,12 @@ def create_result_dir(userdef_dir_name, continued_sim, sim_type, timestamp_choic
     ----------
     userdef_dir_name : string
         User defined result directory name
-    continued_sim : string
-        (yes / no) Are we continuing the simulation from previous file?
+    continued_sim : bool
+        Are we continuing the simulation from previous file?
     sim_type : string
         (steady / dynamic) Simulation type
-    timestamp_choice : string
-        (yes / no) Do you want timestamp on your (newly created) directory name?
+    timestamp_choice : bool
+        Do you want timestamp on your (newly created) directory name?
     timestamp : string
         Timestamp string
 
@@ -766,14 +742,14 @@ def create_result_dir(userdef_dir_name, continued_sim, sim_type, timestamp_choic
     
     
     # --- Results main directory 
-    if continued_sim == 'no': # If we have a new simulation
+    if not continued_sim: # If we have a new simulation
     
         # Define name of directory
         if userdef_dir_name =="": # If the name is empty, use only timestamp
             result_dir_name = timestamp
         else: # if there is a user defined name, use that
             result_dir_name = userdef_dir_name # If result directory is named by user, use that name
-            if timestamp_choice == 'yes': # Append timestamp if defined so by the user
+            if timestamp_choice: # Append timestamp if defined so by the user
                 result_dir_name = result_dir_name + '_' + timestamp
             
         # Make path to currently specified result directory
@@ -901,7 +877,7 @@ def open_log(log_choice, result_path, logname, original_stdout):
     
     log_path = os.path.join(result_path, logname)
     
-    if log_choice == 'yes': #Log saving options
+    if log_choice: #Log saving options
             
         # if __name__ == '__main__': #dont open new files when this is called by other .py files
         
@@ -1043,7 +1019,7 @@ def output_write_settings(saving_json_out):
 
     """
     
-    if saving_json_out == 'yes':
+    if saving_json_out:
         
         # Some internet magic - class for encoding np.arrays to be suitable for json
         class NumpyArrayEncoder(json.JSONEncoder):
@@ -1150,7 +1126,7 @@ def steady_sim_cleanup(saving_json_out, path_saving_data_dir, allowed_files = 2)
 
     """
     # If there are no jsons outputted, just skip
-    if saving_json_out == 'no':
+    if not saving_json_out:
         return
     
     
