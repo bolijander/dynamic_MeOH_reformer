@@ -15,6 +15,8 @@ import json
 
 import math
 
+import global_vars as gv
+
 
 
 ''' 
@@ -52,9 +54,9 @@ def simulation_inputs(input_json_fname):
     
     catalyst = file['catalyst parameters']
     reactor = file['reactor parameters']
-    heating = file['reactor heating']
+    heating = file['reactor heating parameters']
     numerics = file['numerical parameters']
-    field = file['field parameters']
+    field = file['flow field parameters']
     operation = file['simulation parameters']
     saving = file['save file parameters']
     
@@ -102,7 +104,7 @@ def simulation_inputs(input_json_fname):
     tube_cp = float(reactor['material specific heat capacity [J kg-1 K-1]'])
     
     # --- Reactor heating parameters 
-    heating_choice = str(heating['heating type (temperature-profile / flue-gas / joule)']).lower()
+    heating_choice = str(heating['heating type (temperature-profile / flue-gas / joule / steam)']).lower()
     if heating_choice == 'flue-gas':
         T_fluid_in= float(heating['flue gas parameters']['flue gas inlet temperature [C]'])
     else:
@@ -112,14 +114,18 @@ def simulation_inputs(input_json_fname):
     ax_cells = int(numerics['number of axial cells [-]'])
     rad_cells = int(numerics['number of radial cells [-]'])
     
-    adv_scheme = str(numerics['advection discretization scheme (upwind_1o / upwind_2o)']).lower()
+    adv_scheme = str(numerics['advection discretization scheme (upwind_1o / upwind_2o / LaxWendroff / BeamWarming)']).lower()
     diff_scheme = str(numerics['diffusion discretization scheme (central_2o / central_4o)']).lower()
     
     # Check if we're passing correct choices
-    if adv_scheme != 'upwind_1o' and adv_scheme != 'upwind_2o': 
+    if adv_scheme not in ['upwind_1o', 'upwind_2o', 'laxwendroff', 'beamwarming']: 
         raise NameError('Advection discretization scheme not recognized: {}'.format(adv_scheme))
     if diff_scheme != 'central_2o' and diff_scheme != 'central_4o':
         raise NameError('Diffusion discretization scheme not recognized: {}'.format(diff_scheme))
+        
+    flux_limiter_choice = str(numerics['flux limiter (none / minmod / superbee / koren / vanLeer)']).lower()
+    gv.set_flux_limiter(flux_limiter_choice)
+    gv.set_ratio_of_gradients(adv_scheme)
     
     CFL = float(numerics['CFL number [-]'])
     partP_limit = float(numerics['conversion model partial pressure low limit [Pa]'])
@@ -132,19 +138,17 @@ def simulation_inputs(input_json_fname):
     if p_set_pos != 'inlet' and p_set_pos != 'outlet':
         raise NameError('Given position of reactor pressure not recognized: {}'.format(p_set_pos))
     
-    
-    inlet_gas_T = float(field['inlet gas temperature [C]'])
+    inlet_gas_T = float(field['inlet feed temperature [C]'])
     init_reactor_T = float(field['initial reactor temperature [C]'])
     
-    flow_rate = str(field['flow rate given with (WF / WHSV)']).upper()
-    if flow_rate != 'WF' and flow_rate != 'WHSV':
-        raise NameError('Given known initial flow rate not recongized: {0}'.format(flow_rate))
-        
-    if flow_rate == 'WF':
-        W_F = field['W_cat/F_CH3OH - catalyst weight per CH3OH molar feed rate [kg s mol-1]']
-    elif flow_rate == 'WHSV': 
-        W_F = field['WHSV - hourly CH3OH molar feed rate per catalyst weight [mol h-1 kg-1]']
-        W_F = 1/(W_F / 3600)# get [ kg s mol-1]
+    # inlet flow rate
+    flow_rate = float(field['inlet feed flow rate in one tube'])
+    # Read and set feed flow rate unit/definition in global vars
+    fr_definition = int(field['inlet feed flow rate definition'])
+    gv.set_inlet_flowrate_unit(fr_definition)
+    # Set steam to carbon ratio in the class
+    gv.inletClass.SC_ratio = SC_ratio # [-] Steam to carbon ratio
+    gv.inletClass.my_X_i = np.asarray(field['user defined inlet molar fractions of [CH3OH, H2O, H2, CO2, CO, N2]'])
     
     # --- Simulation type and operation parameters 
     sim_type = str(operation['simulation type (steady / dynamic)']).lower() 
@@ -273,7 +277,7 @@ def simulation_inputs(input_json_fname):
     return_list = [cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bulk, cat_composition, \
                    n_tubes, tube_l, tube_d_in, tube_s, tube_rho, tube_h, tube_cp, T_fluid_in,\
                    ax_cells, rad_cells, adv_scheme, diff_scheme, CFL, partP_limit, Ci_limit,\
-                   SC_ratio, p_ref, p_set_pos, inlet_gas_T, init_reactor_T, W_F,\
+                   SC_ratio, p_ref, p_set_pos, inlet_gas_T, init_reactor_T, flow_rate,\
                    sim_type, max_iter, convergence, field_relax, dt, dur_time, dyn_bc, cont_sim, cont_data_dir_path,\
                    s_dir_name, s_only_terminal, steady_save_every, dyn_save_every, dynsim_converge_first, dynsim_cont_convergence,\
                    steady_write_every, dyn_write_every, save_last_jsons, s_timestamp, s_json_out, s_log, s_files_in]
@@ -324,7 +328,7 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
         
         
         # Read what kind of heating we're using
-        heating_choice = json.load(open(input_json_fname))['reactor heating']['heating type (temperature-profile / flue-gas / joule)'].lower()
+        heating_choice = json.load(open(input_json_fname))['reactor heating parameters']['heating type (temperature-profile / flue-gas / joule)'].lower()
 
         print('Dynamic wall heating with {0} used'.format(bc_name_dict[heating_choice].upper()))    
         print('Check input file for details')
@@ -337,12 +341,12 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
     # List of parameters to read from dynamic boundary condition dictionary
     read_list = [ 
         'use dynamic inlet temperature',
-        'use dynamic inlet mass flow',
+        'use dynamic inlet flow rate',
         'use dynamic pressure'
         ]
 
     bc_name_list = [
-        'Inlet gas temperature',
+        'Inlet feed temperature',
         'Inlet mass flow',
         'Pressure at {0}'.format(p_ref_pos.upper())
             ]
@@ -350,8 +354,8 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
     bc_units = ['[C]', '[kg s mol-1]', '[bar]']
 
     value_keys = [
-        'inlet gas temperature in time (t[s], T_in[C])',
-        'inlet mass flow in time (t[s], W_cat/F_CH3OH[kg s mol-1])',
+        'inlet feed temperature in time (t[s], T_in[C])',
+        'inlet mass flow in time (t[s], inlet_feed[user defined unit])',
         'pressure in time (t[s], p[bar])'
         ]
 
@@ -377,7 +381,7 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
 
 
 
-def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_const):
+def read_and_set_dynamic_BCs(input_json_fname,dyn_bc, T_in_const, flowrate_in_const, p_ref_const):
     """
     Read boundary conditions and define time dependant functions of boundary conditions 
 
@@ -389,8 +393,8 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
         Use dynamic boundary conditions or not 
     Tw_in_const : float
         [T] .json defined constant inlet gas temperature 
-    WF_in_const : float
-        [kg s mol-1] Constant inlet methanol molar flow rate 
+    flowrate_in_const : float
+        [] .json defined constant inlet flow rate. Unit defined in .json
     p_ref_const : float
         [Pa] Constant reference pressure 
 
@@ -401,7 +405,7 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
 
     Returns
     -------
-    T_in_func, WF_in_func, p_in_func : functions
+    T_in_func, flowrate_in_func, p_in_func : functions
         Interpolation functions for wall temperature profile, inlet gas temperature, inlet methanol feed, inlet gas pressure
 
     """
@@ -412,7 +416,7 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
         T_in_func = lambda t : T_in_const # Return from .json
         
         # --- Methanol inlet molar flow rate
-        WF_in_func = lambda t : WF_in_const # Return from .json
+        flowrate_in_func = lambda t : flowrate_in_const # Return from .json
         
         # --- Inlet pressure function
         p_ref_func = lambda t : p_ref_const
@@ -435,7 +439,7 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
         else: 
             # - Otherwise read values from dictionary
             # Matrix containint times and temperatures
-            Tin_matrix = np.asarray(dyn_BC['inlet gas temperature in time (t[s], T_in[C])'])
+            Tin_matrix = np.asarray(dyn_BC['inlet feed temperature in time (t[s], T_in[C])'])
             # Extract respective arrays from the matrix
             T_in = Tin_matrix[:,1]
             time_T_in = Tin_matrix[:,0]
@@ -478,37 +482,37 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
         
         # --- Inlet feed 
         # Get condition first
-        condition = bool(dyn_BC['use dynamic inlet mass flow'])
+        condition = bool(dyn_BC['use dynamic inlet flow rate'])
         
         if not condition: # If we're not using this dynamic BC
             # Make a function that just returns the set temperature from .json
-            WF_in_func = lambda t : WF_in_const 
+            flowrate_in_func = lambda t : flowrate_in_const 
         
         else: 
             # - Otherwise read values from dictionary
             # Matrix containint times and temperatures
-            WFin_matrix = np.asarray(dyn_BC['inlet mass flow in time (t[s], W_cat/F_CH3OH[kg s mol-1])'])
+            frate_in_matrix = np.asarray(dyn_BC['inlet mass flow in time (t[s], inlet_feed[user defined unit])'])
             # Extract respective arrays from the matrix
-            WF_in = WFin_matrix[:,1]
-            time_WF_in = WFin_matrix[:,0]
+            frate_in = frate_in_matrix[:,1]
+            time_frate_in = frate_in_matrix[:,0]
             
-            if len(WF_in) == 0 or len(time_WF_in) == 0: # If nothing in list(s) 
-                raise ValueError('In "dynamic boundary conditions", there are empty lists in inlet mass flow profiles')
+            if len(frate_in) == 0 or len(time_frate_in) == 0: # If nothing in list(s) 
+                raise ValueError('In "dynamic boundary conditions", there are empty lists in inlet flow rate profiles')
             
-            if len(WF_in) == 1: # If one element in list 
-                WF_in_func = lambda t : WF_in[0] # Dont bother with interpolation, just return that value
+            if len(frate_in) == 1: # If one element in list 
+                flowrate_in_func = lambda t : frate_in[0] # Dont bother with interpolation, just return that value
                 
             else: # If multiple values in list
                     # - First check some things 
-                    if len(time_WF_in) != len(WF_in): # Amount of inlet feeds points should match number of time points
-                        raise ValueError('In "dynamic boundary conditions", length of t_WF_in and WF_in does not match!')
+                    if len(time_frate_in) != len(frate_in): # Amount of inlet feeds points should match number of time points
+                        raise ValueError('In "dynamic boundary conditions", length of t_frate_in and frate_in does not match!')
                         
-                    if not ( sorted(time_WF_in) == time_WF_in).all(): # Time should be given in ascending order
-                        raise ValueError('In "dynamic boundary conditions", t_WF_in should be given in ascending order')
+                    if not ( sorted(time_frate_in) == time_frate_in).all(): # Time should be given in ascending order
+                        raise ValueError('In "dynamic boundary conditions", t_frate_in should be given in ascending order')
                         
-                    def WF_in_func(t): 
+                    def flowrate_in_func(t): 
                         """
-                        Interpolates inlet gas feed (W/F_CH3OH) in time
+                        Interpolates inlet flow rate (unit user defined) in time
             
                         Parameters
                         ----------
@@ -517,13 +521,13 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
             
                         Returns
                         -------
-                        WF_inlet : float
+                        flowrate_inlet : float
                             Inlet feed at time t
                         """
                         
-                        WF_inlet = np.interp(t, time_WF_in, WF_in)
+                        flowrate_inlet = np.interp(t, time_frate_in, frate_in)
                         
-                        return WF_inlet
+                        return flowrate_inlet
         
         
         
@@ -579,7 +583,7 @@ def read_and_set_BCs(input_json_fname,dyn_bc, T_in_const, WF_in_const, p_ref_con
                         return p_reference
 
 
-    return T_in_func, WF_in_func, p_ref_func
+    return T_in_func, flowrate_in_func, p_ref_func
 
 
 
@@ -659,9 +663,10 @@ def read_cont_sim_data(cont_data_dir_path):
     field_H2 = t_file['H2']
     field_CO2 = t_file['CO2']
     field_CO = t_file['CO']
+    field_N2 = t_file['N2']
     
     # Join them in one 3D array
-    field_Ci_n = np.dstack((field_CH3OH, field_H2O, field_H2, field_CO2, field_CO))
+    field_Ci_n = np.dstack((field_CH3OH, field_H2O, field_H2, field_CO2, field_CO, field_N2))
     # Shuffle around the axes to match wanted output
     field_Ci_n = np.swapaxes(field_Ci_n, 1, 2)
     field_Ci_n = np.swapaxes(field_Ci_n, 0, 1)
@@ -676,10 +681,18 @@ def read_cont_sim_data(cont_data_dir_path):
     # Wall temperature
     wall_temp = np.asarray(t_file['T wall'])
     # Heating fluid temperature
-    temp_hfluid = np.asarray(t_file['T hfluid'])
+    temp_hfluid = t_file['T hfluid']
+    if not isinstance(temp_hfluid, str): # Convert to nparray if its not a string
+        temp_hfluid = np.asarray(temp_hfluid)
+        
+    # Steam condensate outflow        
+    m_condensate = t_file['m out condensate']
+    if not isinstance(m_condensate, str): # Convert to nparray if its not a string
+        m_condensate = np.asarray(m_condensate)
+    
     
     # --- Put all variables into a nice list
-    return_list = [t, field_Ci_n, field_T, field_p, field_v, field_BET, wall_temp, temp_hfluid,\
+    return_list = [t, field_Ci_n, field_T, field_p, field_v, field_BET, wall_temp, temp_hfluid, m_condensate,\
                    SC_ratio, n_tubes, l_tube, d_tube_in, s_tube, rho_tube, h_tube, cp_tube, \
                    N, epsilon, cells_ax, cells_rad,\
                    cat_shape, cat_dimensions, rho_cat, rho_cat_bulk, cat_composition, cat_cp, fresh_cat_BET_area]
