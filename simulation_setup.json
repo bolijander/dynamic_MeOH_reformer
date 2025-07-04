@@ -8,29 +8,33 @@
 
         "known catalyst density (density / bulk density / both)": "density",
         "catalyst density [kg m-3]": 1300,
-        "catalyst bulk density [kg m-3]": 1000
+        "catalyst bulk density [kg m-3]": 1000,
+		
+		"catalyst average pore diameter [m]": 6.4e-9
     },
 	
 	
 
     "numerical parameters": {
-        "number of axial cells [-]": 100,
-        "number of radial cells [-]": 25,
+        "number of axial cells [-]": 28,
+        "number of radial cells [-]": 15,
 
         "advection discretization scheme (upwind_1o / upwind_2o / LaxWendroff / BeamWarming)": "upwind_2o",
         "diffusion discretization scheme (central_2o / central_4o)": "central_4o",
 		"flux limiter (none / minmod / superbee / koren / vanLeer)": "none",
+		
+		"intraparticle diffusion effectiveness factor (none / Thiele / distribution)": "none",
 
         "CFL number [-]": 0.9,
-        "conversion model partial pressure low limit [Pa]": 10,
+        "conversion model partial pressure low limit [Pa]": 100,
         "specie concentration low limit [mol m-3]": 0
     },
 	
 	
 
     "reactor parameters": {
-		"reactor tube length [m]": 1,
-        "single tube inner diameter [m]": 0.02,
+		"reactor tube length [m]": 0.3,
+        "single tube inner diameter [m]": 0.03,
         "single tube wall thickness [m]": 0.005,
 
         "total number of tubes in the reactor [-]": 5,
@@ -39,7 +43,7 @@
         "number of baffle plates [-]": 4,
         "baffle window height as percentage of baffle diameter [-]": 0.25,
         "number of tubes in baffle window [-]": 2,
-        "tube pitch [m]": 0.0375,
+        "tube pitch [m]": 0.0475,
 
         "material density [kg m-3]": 7100,
         "material thermal conductivity [W m-1 K-1]": 11,
@@ -65,7 +69,7 @@
         },
 
         "joule heating parameters": {
-            "current through single tube [A]": 90,
+            "current through single tube [A]": 162,
             "tube material electrical resistivity [ohm m]": 1.4e-6
         },
 		
@@ -79,7 +83,7 @@
     "flow field parameters": {
         "feed steam to carbon ratio [-]": 1.5,
 
-        "reactor pressure [bar]": 5,
+        "reactor pressure [bar]": 3,
         "position of given reactor pressure (inlet / outlet)": "inlet",
 
         "inlet feed temperature [C]": 250,
@@ -109,10 +113,9 @@
         "simulation type (steady / dynamic)": "steady",
 
         "steady simulation parameters": {
-            "maximum iterations": 727000,
+            "maximum iterations": 1000000,
             "convergence criteria": 1e-8,
-            "field underrelaxation factor": 4e-4,
-            "wall underrelaxation factor": 0.1
+            "field underrelaxation factor": 2e-4
         },
 
         "dynamic simulation parameters": {
@@ -159,9 +162,9 @@
             "temperature profile parameters": {
                 "reactor wall temperature profile z relative positions": [0, 1],
                 "reactor wall temperature profile in time (t[s], T_profile[C])": [
-                    [0, [261, 261]],
-                    [0.001, [261, 261]],
-                    [0.002, [273, 273]]]
+                    [0, [250, 250]],
+                    [0.001, [250, 250]],
+                    [0.002, [270, 270]]]
             },
 
             "flue gas parameters": {
@@ -190,7 +193,7 @@
             },
 			
 			"steam heating parameters": {
-				"use dynamic condensation temperature": false,
+				"use dynamic condensation temperature": true,
 				"condensation temperature in time (t[s], T[C])": [
 					[0, 250],
 					[1, 260]]

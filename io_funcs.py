@@ -91,7 +91,7 @@ def simulation_inputs(input_json_fname):
     
     rho_cat = float(catalyst['catalyst density [kg m-3]'])
     rho_cat_bulk = float(catalyst['catalyst bulk density [kg m-3]'])
-
+    cat_pore_d = float(catalyst['catalyst average pore diameter [m]'])
     
     # --- Reactor parameters
     n_tubes = int(reactor['total number of tubes in the reactor [-]'])
@@ -124,6 +124,7 @@ def simulation_inputs(input_json_fname):
         raise NameError('Diffusion discretization scheme not recognized: {}'.format(diff_scheme))
         
     flux_limiter_choice = str(numerics['flux limiter (none / minmod / superbee / koren / vanLeer)']).lower()
+    # Set flux limiter options in global variable file
     gv.set_flux_limiter(flux_limiter_choice)
     gv.set_ratio_of_gradients(adv_scheme)
     
@@ -137,6 +138,8 @@ def simulation_inputs(input_json_fname):
     p_set_pos = str(field["position of given reactor pressure (inlet / outlet)"]).lower()
     if p_set_pos != 'inlet' and p_set_pos != 'outlet':
         raise NameError('Given position of reactor pressure not recognized: {}'.format(p_set_pos))
+    # Set the pressure control position in global variable scheme
+    gv.set_pressure_calculation_scheme(p_set_pos)
     
     inlet_gas_T = float(field['inlet feed temperature [C]'])
     init_reactor_T = float(field['initial reactor temperature [C]'])
@@ -274,7 +277,7 @@ def simulation_inputs(input_json_fname):
     
         s_files_in = bool(saving['save input files'])
             
-    return_list = [cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bulk, cat_composition, \
+    return_list = [cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bulk, cat_pore_d, cat_composition, \
                    n_tubes, tube_l, tube_d_in, tube_s, tube_rho, tube_h, tube_cp, T_fluid_in,\
                    ax_cells, rad_cells, adv_scheme, diff_scheme, CFL, partP_limit, Ci_limit,\
                    SC_ratio, p_ref, p_set_pos, inlet_gas_T, init_reactor_T, flow_rate,\
@@ -324,11 +327,12 @@ def check_used_dynamic_BCs(input_json_fname, p_ref_pos, colw):
         
         bc_name_dict = {'temperature-profile':'Wall temperature profile',
                        'flue-gas':'Flue gas',
-                       'joule':'Current through tube wall'}
+                       'joule':'Current through tube wall',
+                       'steam': 'Condensing steam'}
         
         
         # Read what kind of heating we're using
-        heating_choice = json.load(open(input_json_fname))['reactor heating parameters']['heating type (temperature-profile / flue-gas / joule)'].lower()
+        heating_choice = json.load(open(input_json_fname))['reactor heating parameters']['heating type (temperature-profile / flue-gas / joule / steam)'].lower()
 
         print('Dynamic wall heating with {0} used'.format(bc_name_dict[heating_choice].upper()))    
         print('Check input file for details')

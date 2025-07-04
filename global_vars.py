@@ -117,7 +117,6 @@ def set_inlet_flowrate_unit(spec):
 
 
 # Flux limiters 
-
 class FLClass: # Create an empty class that will contain methods for slope limiting
     pass 
 
@@ -212,6 +211,77 @@ def set_ratio_of_gradients(scheme):
 
 
 
+
+# Pressure propagation
+# Choice of set pressure at inlet or outlet decides whether we populate the pressure field forward or backward
+class pressureControlPoint: # Create an empty class that will contain functions for populating the pressure field
+    pass 
+
+pressureSetPoint = pressureControlPoint() # Define an instance
+
+def set_pressure_calculation_scheme(setpoint):
+    # This is a function which defines whether we propagate pressure forward or backwards 
+    
+    if setpoint == 'inlet': 
+        # Forward propagation from the inlet setpoint 
+        def populate_pressure_field(self, dp_array, dz, z_centers_array, p_ref, cell_face_z_positions):
+            '''
+            dp_array : array of pressure drops
+            dz : value of cell dz
+            z_centers_array : array of z center coordinates
+            p_ref : reference pressure (inlet)
+            cell_face_z_positions : array of z cell face coordinates
+            '''
+            
+            # Array of cumulative pressure drop at cell faces - at the start only populated with zero
+            dpdz_c_face = np.asarray([0])
+            
+            for dp in dp_array: # calculate the cumulative pressure drop along the z axis and 
+                dpdz_c_face = np.append(dpdz_c_face, dpdz_c_face[-1] + dp*dz)
+                
+            # interpolate between the edges to get center cumulative pressure values
+            dpdz_c_centers = np.interp(z_centers_array, cell_face_z_positions, dpdz_c_face)
+            # Add dp values to static field
+            p_array = p_ref + dpdz_c_centers
+            
+            # Inlet and outlet pressure values are first and last items in p_edges array
+            # Inlet pressure is unchanged, 
+            p_inlet = p_ref 
+            p_outlet = p_ref + dpdz_c_face[-1]
+            
+            return p_inlet, p_outlet, p_array
+        
+    elif setpoint == 'outlet':
+        # Forward propagation from the outlet setpoint backwards
+        def populate_pressure_field(self, dp_array, dz, z_centers_array, p_ref, cell_face_z_positions):
+            
+            # Array of cumulative pressure drop at cell faces - at the start only populated with zero
+            dpdz_c_face = np.asarray([0])
+            
+            for dp in np.flip(dp_array): # calculate the cumulative pressure drop along the z axis and 
+                # Array is flipped because we populate it backwards (outlet to inlet)   
+                dpdz_c_face = np.append(dpdz_c_face, dpdz_c_face[-1] - dp*dz)
+            
+            dpdz_c_face = np.flip(dpdz_c_face)  # Flip the array again
+                
+            # interpolate between the edges to get center cumulative pressure values
+            dpdz_c_centers = np.interp(z_centers_array, cell_face_z_positions, dpdz_c_face)
+            # Add dp values to static field
+            p_array = p_ref + dpdz_c_centers
+            
+            # Inlet and outlet pressure values are first and last items in p_edges array
+            # Outlet pressure is unchanged, inlet includes cumulative pressure build
+            p_outlet = p_ref 
+            p_inlet = p_ref + dpdz_c_face[0]
+            
+            return p_inlet, p_outlet, p_array
+    else: 
+        raise ValueError('Selected pressure control point not recognized (' + str(setpoint) + ') - Check definition in input .json file')
+        
+    # Add the defined function to the class    
+    setattr(pressureControlPoint, 'populate_pressure_field', populate_pressure_field) 
+    
+    return
 
 
 

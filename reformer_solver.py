@@ -4,20 +4,19 @@ Main file
 Methanol steam reforming model
 plug flow packed bed reactor 
 
-
 Author:         Bojan Grenko
 Institution:    Delft University of Technology 
 
-This code uses a model which is a dynamic expansion of the model of Dr. Jimin Zhu, developed in their PhD thesis.
+This solver was written for the purpose of completing my PhD thesis. Permissions for code usage are detailed in the accompanying licence file. 
+The present code builds upon the work and coding performed in PhD thesis of Dr. Jimin Zhu ( https://doi.org/10.54337/aau513444640 )
 
-This code was produced within the MENENS project. 
-
+The present work is part of MENENS project ( https://menens.nl/ )
 """
 
 import numpy as np
-import math
+# import math
 
-import os
+# import os
 import sys
 import copy
 
@@ -54,7 +53,7 @@ original_stdout = sys.stdout # save original stdout
 # -------------------------------------------------
 
 # --- Read all inputs from .json file
-cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bulk, cat_composition, \
+cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bulk, cat_pore_d, cat_composition, \
     n_tubes, l_tube, d_tube_in, s_tube, rho_tube, h_tube, cp_tube, T_fluid_in,\
     cells_ax, cells_rad, adv_scheme, diff_scheme, CFL, pi_limit, Ci_limit,\
     SC_ratio, p_ref_n, p_set_pos, T_in_n, init_T_field, flowrate_in_n,\
@@ -62,8 +61,6 @@ cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bul
     results_dir_name, saving_only_terminal, steady_save_every, dyn_save_every, dynsim_converge_first, dynsim_cont_converg,\
     steady_write_every, dyn_write_every, keep_last_jsons, saving_timestamp, saving_json_out, saving_log, saving_files_in = io.simulation_inputs(input_json_fname)
        
-    
-# !!! - NEED TO SET
     
 '''   
 # --- Catalyst parameters
@@ -74,6 +71,7 @@ cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bul
 # known_cat_density - (density / bulk density / both) - option: which catalyst density is known?
 # rho_cat -     [kg m-3] Catalyst material density
 # rho_cat_bulk - [kg m-3] Catalyst bulk (shipping) density 
+# cat_pore_d - [m] Average catalyst pore diameter
 # cat_composition - [-] Catalyst composition - weight percentages of CuO and Al2O3
 
 # --- Reactor parameters
@@ -128,24 +126,7 @@ cat_shape, cat_dimensions, cat_BET_area, known_cat_density, rho_cat, rho_cat_bul
 
 
 R = 8.31446261815324 # Universal gas constant [J K-1 mol-1] 
-
-
-uniform_dz = True  # Parameter to check whether uniform axial mesh with constant dz is used
-
-
-'''
-TO ADD
-'''
-
-# !!! CODE IN: 
-    # Effectiveness factors
-    # Add residuals to dynamic sym
-    # n_tubes - handle this somehow? - maybe in postprocessing. only relevant if i have burner gas in this sim
-
-    # Effectiveness factors
-nu_i = 1
-nu_j = 1
-
+# uniform_dz = True  # Parameter to check whether uniform axial mesh with constant dz is used
 
 # -------------------------------------------------
 # ------ Preparing directories and files
@@ -188,6 +169,63 @@ print('\nSimulation setup file:', input_json_fname)
 # Convert pressure from bar to Pascal
 p_ref_n = p_ref_n * 1e5 # Convert to Pascal
 
+
+# -- Define global unchanging variables - geometric and mesh variables
+# This is a function because its called at different times depending on whether we continue the simulation from file or make a new one
+def set_globals():
+    
+    # -- Mesh variables
+    gv.dz = cell_dz[0] # delta z of a mesh [float]
+    gv.cell_dz = cell_dz
+    gv.cell_dr = cell_dr
+    gv.mesh_volumes = cell_V # Cell volumes 2D array
+    gv.cell_center_z_positions = cell_z_centers # Cell center positions along Z axis
+    gv.cell_center_r_positions = cell_r_centers # Cell center positions along r axis
+
+    # Ratio of wall cell outer are to wall cell volume [m-1]
+    gv.A_V_ratio_wall_cell = (np.pi * r_tube*2) / (np.pi/4 * ( (r_tube*2)**2 - ( (r_tube-cell_dr[0])*2 )**2 ) )
+    
+    # number of cells
+    gv.rad_n_cells = cells_rad
+    gv.ax_n_cells = cells_ax
+    # Meshgrid formats of mesh  
+    # First get required meshgrids
+    dz_mgrid, dr_mgrid = np.meshgrid(cell_dz, cell_dr) 
+    z_centers_mgrid, r_centers_mgrid = np.meshgrid(cell_z_centers, cell_r_centers)
+    gv.dz_mgrid = dz_mgrid
+    gv.dr_mgrid = dr_mgrid
+    gv.z_centers_mgrid = z_centers_mgrid
+    gv.r_centers_mgrid = r_centers_mgrid
+    
+    gv.cell_face_z_positions = np.append(0, cell_z_faces_R) # Cell face Z positions array
+    gv.cell_V_1D = r_tube**2 *np.pi * cell_dz # 1D cell sizes
+    
+    # -- Reactor variables
+    gv.epsilon = epsilon # Porosity
+    gv.r_tube = r_tube # Radius of one reactor tube 
+    gv.d_tube = r_tube*2 # Internal diameter of one reactor tube
+    gv.l_tube = l_tube # Length of one reactor tube
+    gv.A_tube_CS = r_tube**2 * np.pi # Internal cross sectional area of one tube 
+    gv.N_aspect_ratio = N # Aspect ratio of catalyst particle diameter and reactor tube diameter
+    
+    # -- Catalyst properties
+    gv.d_p = d_cat_part_v # volume equivalent catalyst particle diameter
+    gv.catalyst_rho_bulk = rho_cat_bulk # Bulk / bed catalyst density
+    gv.catalyst_cp = cat_cp # Catalyst thermal capacity
+    gv.catalyst_shape = cat_shape # Catalyst shape [string]
+    gv.cat_pore_d = cat_pore_d # Catalyst pore size
+    
+    # -- Numerical properties / variables
+    # Set the amount of ghost cells on each domain side based on chosen discretization schemes
+    adv_index, diff_index = mf.discretization_schemes_and_ghost_cells(adv_scheme, diff_scheme)
+    gv.advection_scheme_index  = adv_index # numerical scheme index
+    gv.diffusion_scheme_index  = diff_index # numerical scheme index
+    gv.pressure_low_limit = pi_limit # Low limit of pressure to avoid division by zero in reaction rate calculation
+    
+    return
+
+
+
 # --- Read data for simulation continuation
 if cont_sim:
     
@@ -197,10 +235,6 @@ if cont_sim:
         N, epsilon, cells_ax_old, cells_rad_old,\
         cat_shape, cat_dimensions, rho_cat, rho_cat_bulk, cat_composition, cat_cp, cat_BET_area = io.read_cont_sim_data(path_old_sim_data)
         
-    # Add reading of m_condensed_n from file in continued simulation
-    # Also add this to the interpolation function down below
-    
-    
     # --- Calculate catalyst particle (equivalent) volume and diameter 
     V_cat_part, d_cat_part_s, d_cat_part_v = mf.catalyst_dimensions(cat_shape, cat_dimensions)
         
@@ -222,23 +256,26 @@ if cont_sim:
             cell_V = mf.uniform_mesh(cells_ax, cells_rad, l_tube, r_tube)
     else:
         # Otherwise, we interpolate fields
+        
         cell_dz, cell_dr, \
             cell_z_faces_L, cell_z_faces_R, cell_z_centers, \
             cell_r_faces_IN, cell_r_faces_EX, cell_r_centers, \
             cell_z_A, cell_r_A_IN, cell_r_A_EX, \
             cell_V, \
             field_Ci_n, field_T_n, field_BET_cat, \
-            T_wall_n, T_hfluid_n = mf.interpolate_to_new_mesh(l_tube, r_tube, 
+            T_wall_n, T_hfluid_n, field_p, m_condensed_n = mf.interpolate_to_new_mesh(l_tube, r_tube, 
                                                                 cells_ax_old, cells_rad_old, cells_ax, cells_rad,
-                                                                field_Ci_n, field_T_n, field_BET_cat, T_wall_n, T_hfluid_n)
+                                                                field_Ci_n, field_T_n, field_BET_cat, T_wall_n, T_hfluid_n, field_p, m_condensed_n)
             
     # Get inlet molar flow rates and molar fractions            
     ni_in_n, Xi_in_n = gv.inlet.CX(flowrate_in_n)
     
+    set_globals() # define global variables
+    
     # --- Get and prepare inlet/outlet values
     v_in_n, v_out_n, field_v, \
         p_in_n, p_out_n, field_p, \
-        Q_in_n, Q_out_n, C_in_n, rho_in_n, rho_out_n = mf.get_IO_velocity_and_pressure(p_ref_n, p_set_pos, T_in_n, ni_in_n, Xi_in_n, epsilon, r_tube, l_tube, d_cat_part_v, cell_z_centers)
+        Q_in_n, Q_out_n, C_in_n = mf.get_IO_velocity_and_pressure(p_ref_n, field_T_n, field_Ci_n, field_v, field_p, ni_in_n, T_in_n, Xi_in_n)
 
 elif not cont_sim:
 
@@ -275,25 +312,34 @@ elif not cont_sim:
     # --- Operation parameters
     
     # --- Prepare some variables and do field initialization
-    
     # Get inlet molar flow rates and molar fractions            
     ni_in_n, Xi_in_n = gv.inlet.CX(flowrate_in_n)
     
-    # --- Get and prepare inlet/outlet values
-    v_in_n, v_out_n, field_v, \
-        p_in_n, p_out_n, field_p, \
-        Q_in_n, Q_out_n, C_in_n, rho_in_n, rho_out_n = mf.get_IO_velocity_and_pressure(p_ref_n, p_set_pos, T_in_n, ni_in_n, Xi_in_n, epsilon, r_tube, l_tube, d_cat_part_v, cell_z_centers) 
+    # -- Make some field initial guesses
     
-    # Make temperature field
+    # Guess inlet molar concentrations 
+    C_in_n = mf.X_to_concentration(Xi_in_n, p_ref_n, T_in_n)
+    
+    # Guess the pressure field, p inlet and outlet
+    p_in_n = p_ref_n
+    p_out_n = p_ref_n
+    field_p = np.ones(cells_ax) * p_ref_n
+    
+    # Guess the initial velocity field 
+    Q_in_n, v_in_n = mf.velocity_and_flowrate(ni_in_n, p_ref_n, T_in_n, r_tube)
+    field_v = np.ones(cells_ax) * v_in_n
+    v_out_n = copy.deepcopy(v_in_n)
+    
+    # Make temperature field - initial guess
     field_T_n = np.ones((cells_rad, cells_ax)) * init_T_field
     
     # Take initial wall temperature guess to be the same as outer cell in T field
     T_wall_n = field_T_n[0,:]
-    T_hfluid_n = np.ones(np.shape(T_wall_n))*T_fluid_in
+    T_hfluid_n = np.ones(cells_ax)*T_fluid_in
     # A guessed array of condensed steam on the tube for condensing steam case
-    m_condensed_n = np.ones(np.shape(T_wall_n)) *1e-4
+    m_condensed_n = np.ones(cells_ax) *1e-4
     
-
+    
     # Make concentration array
     field_Ci_n = np.zeros((6, cells_rad, cells_ax)) # Empty array
     # Assume reactor is filled with inlet mixture at t=0
@@ -303,16 +349,20 @@ elif not cont_sim:
     field_Ci_n[3, :,:] = C_in_n[3] # CO2
     field_Ci_n[4, :,:] = C_in_n[4] # CO
     field_Ci_n[5, :,:] = C_in_n[5] # N2
+
+    # define global variables
+    set_globals() 
     
+    # --- Get and prepare inlet/outlet values
+    v_in_n, v_out_n, field_v, \
+        p_in_n, p_out_n, field_p, \
+        Q_in_n, Q_out_n, C_in_n = mf.get_IO_velocity_and_pressure(p_ref_n, field_T_n, field_Ci_n, field_v, field_p, ni_in_n, T_in_n, Xi_in_n) 
+
     # Catalyst surface area array
     field_BET_cat = np.ones((cells_rad, cells_ax)) * cat_BET_area
     
     # Simulation time is always zero in new simulation
     t_abs = 0.0
-
-
-# Set the amount of ghost cells on each domain side based on chosen discretization schemes
-adv_index, diff_index = mf.discretization_schemes_and_ghost_cells(adv_scheme, diff_scheme)
 
 # Effective radial diffusion coefficient
 field_D_er = mf.radial_diffusion_coefficient(field_v, d_cat_part_v, d_tube_in)
@@ -328,23 +378,17 @@ if sim_type == 'dynamic':
     # We do this now because then we have BCs in the script and we don't need the input .json anymore
 
 
-# Get wall heating choice, and make a class (Twall_func) in global_vars that has wall temperature methods for steady and dynamic operation
-# Also get a temperature function that 
+# Set wall heating choice function in globals
 wall_heating = mf.read_and_set_T_wall_BC(input_json_fname, dyn_bc, cell_z_centers, l_tube)
+# Set effectiveness factor choice and read what is it
+effectiveness_factor = mf.read_and_set_effectiveness_factor(input_json_fname)
 
-# Add some unchanging variables to this class that uses it in some methods 
+# Global variables in wall heating functions
 gv.Twall_func.d_p = d_cat_part_v
 gv.Twall_func.epsilon = epsilon
-# Some other globally used (unchanging) variables
-gv.mesh_volumes = cell_V
 
 
-'''
-Things to add here:
 
-- non-uniform mesh (currently everywhere it is assumed that mesh is uniform in z direction) ???
-
-'''
 
 print('\n=======================================')
 print('******* SIMULATION RUNDOWN')
@@ -394,35 +438,28 @@ print('=====================================================\n')
 print('# --- Calculated catalyst parameters for %s catalyst' %(cat_shape.upper())) 
 print('-----------------------------------------------------\n')
 
-print('Cat. particle (equivalent) diameter:'.ljust(colw) +'{0:.5f} [m]'.format(d_cat_part_v))
-print('Cat. particle (equivalent) volume:'.ljust(colw) + '{0:.3e} [m3]\n'.format(V_cat_part))
-
+# print('Cat. particle (equivalent) diameter:'.ljust(colw) +'{0:.5f} [m]'.format(d_cat_part_v))
+# print('Cat. particle (equivalent) volume:'.ljust(colw) + '{0:.3e} [m3]\n'.format(V_cat_part))
 print('Packed bed aspect ratio (d_tube_in / d_cat):'.ljust(colw) +'{0:.2f} [-]'.format(N))
 print('Reactor porosity:'.ljust(colw) +'{0:.5f} [-]\n'.format(epsilon))
-
 print('Catalyst material density:'.ljust(colw) +'{0:.2f} [kg m-3]'.format(rho_cat))
 print('Catalyst bulk density:'.ljust(colw) +'{0:.2f} [kg m-3]'.format(rho_cat_bulk))
-
-print('Catalyst specific heat capacity:'.ljust(colw) +'{0:.2f} [J kg-1 K-1]\n'.format(cat_cp))
-
+# print('Catalyst specific heat capacity:'.ljust(colw) +'{0:.2f} [J kg-1 K-1]\n'.format(cat_cp))
 print('Reactor (single) tube volume:'.ljust(colw) +'{0:.3e} [m3]'.format(V_tube))
 print('Cat. weight in reactor (single) tube:'.ljust(colw) +'{0:.5f} [kg]\n'.format(W_cat))
 
 print('\n# --- Calculated operation parameters') 
 print('-----------------------------------------------------\n')
 
-print('Init. inlet flow rate (single tube):'.ljust(colw) +'{0:.3f} [user defined]'.format(flowrate_in_n))
-print('Init. inlet vol. flow rate (single tube):'.ljust(colw) +'{0:.3e} [m3 s-1]'.format(Q_in_n))
+# print('Init. inlet flow rate (single tube):'.ljust(colw) +'{0:.3f} [user defined]'.format(flowrate_in_n))
+# print('Init. inlet vol. flow rate (single tube):'.ljust(colw) +'{0:.3e} [m3 s-1]'.format(Q_in_n))
 print('Init. inlet flow (superficial) velocity:'.ljust(colw) +'{0:.5f} [m s-1]\n'.format(v_in_n))
-    
 # print('Init. inlet mixture density:'.ljust(colw) +'{0:.3e} [kg m-3]'.format(rho_in_n))
 # print('Init. inlet mixture (dynamic) viscosity:'.ljust(colw) +'{0:.5e} [Pa s]\n'.format(mu_in_n))
-
-print('Init. reactor pressure drop:'.ljust(colw) +'{0:.5f} [bar]\n'.format( (p_in_n - p_out_n)/1e5  ))
-
+# print('Init. reactor pressure drop:'.ljust(colw) +'{0:.5f} [bar]\n'.format( (p_in_n - p_out_n)/1e5  ))
 
 print( ('Initial given pressure at {0}:'.format(p_set_pos.upper())).ljust(colw) + '{0:.2f} [bar]'.format(p_ref_n/1e5)) 
-print('Init. inlet radial diffusion coeff.:'.ljust(colw) +'{0:.3e} [m2 s-1]\n'.format(field_D_er[0]))
+# print('Init. inlet radial diffusion coeff.:'.ljust(colw) +'{0:.3e} [m2 s-1]\n'.format(field_D_er[0]))
 
 
 # -------------------------------------------------
@@ -452,10 +489,6 @@ values = [sim_type, t_dur, SC_ratio, wall_heating, n_tubes, l_tube, r_tube, s_tu
 write_info_json_steady(names, values, path_sim_data)
 write_info_json_dynamic(names, values, path_sim_data)
 
-# Get meshgrids of 
-dz_mgrid, dr_mgrid = np.meshgrid(cell_dz, cell_dr) 
-z_centers_mgrid, r_centers_mgrid = np.meshgrid(cell_z_centers, cell_r_centers)
-
 
 # -------------------------------------------------
 # ------ STEADY SIMULATION
@@ -463,7 +496,8 @@ z_centers_mgrid, r_centers_mgrid = np.meshgrid(cell_z_centers, cell_r_centers)
 
 
 converg_flag = False # Flag for recognizing convergence
-residuals = 0
+residuals_C = 1
+residuals_T = 1
 
 if sim_type == 'steady' or dynsim_converge_first: # Crank Nicolson scheme for steady state 
     print('\n=======================================')
@@ -472,7 +506,7 @@ if sim_type == 'steady' or dynsim_converge_first: # Crank Nicolson scheme for st
     
     # --- Simulation setup file write - future writing
     # List of name keys for file writing
-    names = ['simulation type', 't', 'iteration', 'residuals', \
+    names = ['simulation type', 't', 'iteration', 'residuals C', 'residuals T', \
              'C in', 'W/F in', 'T in', 'T wall', 'T hfluid', 'T in hfluid', 'm in hfluid', 'p in hfluid',\
              'T in steam', 'p in steam', 'm out condensate', 'total m out condensate',\
              'Q in', 'Q out', 'm in', 'm out',\
@@ -482,7 +516,7 @@ if sim_type == 'steady' or dynsim_converge_first: # Crank Nicolson scheme for st
              'rate MSR', 'rate MD', 'rate WGS', 'rate CH3OH', 'rate H2O', 'rate H2', 'rate CO2', 'rate CO'] 
        
     # Small function that updates writing values
-    steady_value_list = lambda : [sim_type, t_abs, iteration, residuals,\
+    steady_value_list = lambda : [sim_type, t_abs, iteration, residuals_C, residuals_T, \
               C_in_n, (W_cat/ni_in_n[0] if ni_in_n[0]!=0 else 0), T_in_n, T_wall_n, T_hfluid_n, gv.Twall_func.T_in_fgas_steady, gv.Twall_func.m_in_fgas_steady, gv.Twall_func.p_in_fgas_steady,\
               gv.Twall_func.T_steam_steady, gv.Twall_func.p_steam_steady, m_condensed_n, sum(m_condensed_n),\
               Q_in_n, Q_out_n, m_inlet, m_outlet,\
@@ -500,7 +534,7 @@ if sim_type == 'steady' or dynsim_converge_first: # Crank Nicolson scheme for st
     MSR_rate, MD_rate, WGS_rate, CH3OH_rate, H2O_rate, H2_rate, CO2_rate, CO_rate = mf.get_rate_fields(field_Ci_n1, field_T_n1, field_p, field_BET_cat,
                                                                                                 pi_limit)
     # Get mass flows at inlet and outlet
-    m_inlet, m_outlet = mf.get_mass_flow(v_in_n, v_out_n, r_tube, C_in_n, field_Ci_n1)
+    m_inlet, m_outlet = mf.get_mass_flow(ni_in_n, v_out_n, field_Ci_n1)
     
     iteration = 0
     values = steady_value_list()
@@ -510,16 +544,20 @@ if sim_type == 'steady' or dynsim_converge_first: # Crank Nicolson scheme for st
     # Don't change starting value of relaxation factor
     field_relax = copy.deepcopy(field_relax_start)
     
+    
+    # field_v = np.linspace(0.13846, 0.18886, cells_ax)
+    
     # Enter a while loop, condition to drop below convergence limit
     for iteration in range(1,max_iter+1):
         
         # Get steady fluxes from crank nicholson scheme
-        C_fluxes_CN, T_fluxes_CN, Twall_fluxes_CN, Thfluid_fluxes_CN, mcond_fluxes_CN = mf.steady_crank_nicholson(field_Ci_n, field_T_n, cells_rad, C_in_n, T_in_n, T_wall_n, T_hfluid_n, m_condensed_n,\
-                            field_D_er, field_v, field_p,\
-                            dz_mgrid, dr_mgrid, cell_V, r_centers_mgrid,
-                            rho_cat_bulk, field_BET_cat, d_cat_part_v, cat_cp, cat_shape,
-                            epsilon, N, adv_index, diff_index, pi_limit, nu_i, nu_j,\
-                            field_relax)       
+        C_fluxes_CN, T_fluxes_CN, Twall_fluxes_CN, Thfluid_fluxes_CN, mcond_fluxes_CN =\
+            mf.steady_crank_nicholson(field_Ci_n, field_T_n, C_in_n, T_in_n, \
+                                      T_wall_n, T_hfluid_n, m_condensed_n,\
+                                      field_D_er, field_v, field_p,\
+                                      field_BET_cat, field_relax,\
+                                      p_ref_n, ni_in_n, Xi_in_n)       
+            
         
         # From fluxes at n and n+1, get timestep n+1
         field_Ci_n1 = field_Ci_n + C_fluxes_CN  * field_relax
@@ -529,6 +567,14 @@ if sim_type == 'steady' or dynsim_converge_first: # Crank Nicolson scheme for st
         T_hfluid_n = T_hfluid_n + Thfluid_fluxes_CN*field_relax
         m_condensed_n = m_condensed_n + mcond_fluxes_CN# *field_relax
         
+        # # Update pressure and velocity field
+        # v_in_n, v_out_n, field_v, \
+        #     p_in_n, p_out_n, field_p, \
+        #     Q_in_n, Q_out_n, C_in_n = mf.get_IO_velocity_and_pressure(p_ref_n, field_T_n, field_Ci_n, field_v, field_p, ni_in_n, T_in_n, Xi_in_n)
+        
+        
+        # # Effective radial diffusion coefficient
+        # field_D_er = mf.radial_diffusion_coefficient(field_v, d_cat_part_v, d_tube_in)
         
         # Calculate residuals
         residuals_T = np.max(abs(T_fluxes_CN))
@@ -543,7 +589,7 @@ if sim_type == 'steady' or dynsim_converge_first: # Crank Nicolson scheme for st
             MSR_rate, MD_rate, WGS_rate, CH3OH_rate, H2O_rate, H2_rate, CO2_rate, CO_rate = mf.get_rate_fields(field_Ci_n1, field_T_n1, field_p, field_BET_cat,
                                                                                                         pi_limit)
             # Get mass flows at inlet and outlet
-            m_inlet, m_outlet = mf.get_mass_flow(v_in_n, v_out_n, r_tube, C_in_n, field_Ci_n1)
+            m_inlet, m_outlet = mf.get_mass_flow(ni_in_n, v_out_n, field_Ci_n1)
             
             # List of fields and values for .json file writing
             values = steady_value_list()            
@@ -556,13 +602,13 @@ if sim_type == 'steady' or dynsim_converge_first: # Crank Nicolson scheme for st
             print(('Iteration:\t{0} \t Residuals T: {1:.3e} \t Residuals C: {2:.3e}' ).format(str(iteration).ljust(10), residuals_T, residuals_C))
             counter_terminal = 0
             
+            
         # Update old arrays
         field_Ci_n  = copy.deepcopy( field_Ci_n1 )
         field_T_n = copy.deepcopy( field_T_n1 )
         
-        
-        # Update relaxation factor 
-        # relax = new_relax_factor(relax_start, relax_max, residuals, residuals_high_limit, residuals_low_limit)
+        # # Update relaxation factor 
+        # field_relax = mf.new_relax_factor(relax_start, relax_max, residuals, residuals_high_limit, residuals_low_limit)
         
         if residuals < convergence:
             print('\n\nConvergence criteria reached!')
@@ -582,7 +628,7 @@ if sim_type == 'steady' or dynsim_converge_first: # Crank Nicolson scheme for st
     MSR_rate, MD_rate, WGS_rate, CH3OH_rate, H2O_rate, H2_rate, CO2_rate, CO_rate = mf.get_rate_fields(field_Ci_n1, field_T_n1, field_p, field_BET_cat,
                                                                                                 pi_limit)
     # Get mass flows at inlet and outlet
-    m_inlet, m_outlet = mf.get_mass_flow(v_in_n, v_out_n, r_tube, C_in_n, field_Ci_n1)
+    m_inlet, m_outlet = mf.get_mass_flow(ni_in_n, v_out_n, field_Ci_n1)
     
     # List of fields and values for .json file writing
     values = steady_value_list()
@@ -645,7 +691,6 @@ if sim_type == 'dynamic':
     # Empty array of temperatures for time n+1
     field_T_n1 = copy.deepcopy(field_T_n)
         
-    # Effectiveness factors?
     
     # Get values from dynamic BC file
     T_in_n = T_in_func(t_rel)
@@ -656,7 +701,7 @@ if sim_type == 'dynamic':
     MSR_rate, MD_rate, WGS_rate, CH3OH_rate, H2O_rate, H2_rate, CO2_rate, CO_rate = mf.get_rate_fields(field_Ci_n, field_T_n, field_p, field_BET_cat,
                                                                                                 pi_limit)
     # Get mass flows at inlet and outlet
-    m_inlet, m_outlet = mf.get_mass_flow(v_in_n, v_out_n, r_tube, C_in_n, field_Ci_n1)
+    m_inlet, m_outlet = mf.get_mass_flow(ni_in_n, v_out_n, field_Ci_n1)
     
     # -- Write .json at 0th timestep
     values = dynamic_value_list()
@@ -685,14 +730,12 @@ if sim_type == 'dynamic':
             RK_flowrate_in = np.asarray([flowrate_in_n, flowrate_in_func(t_rel + dt/2), flowrate_in_func(t_rel+dt)])
             RK_flowrate_in = np.insert(RK_flowrate_in, 1, RK_flowrate_in[1])
             
+            
             # --- Calculate fluxes with Runge Kutta 4th order scheme
-            Ci_fluxes, T_fluxes, Tw_fluxes, Thf_fluxes, m_condensate_fluxes = mf.RK4_fluxes(RK_dt, RK_times, cells_rad, cells_ax, cell_V, cell_r_centers, cell_z_centers,
-                dz_mgrid, dr_mgrid, z_centers_mgrid, r_centers_mgrid,
-                W_cat, SC_ratio, Xi_in_n, r_tube,
-                T_wall_n, T_hfluid_n, m_condensed_n, RK_T_in, RK_flowrate_in, RK_p_ref, p_set_pos,
+            Ci_fluxes, T_fluxes, Tw_fluxes, Thf_fluxes, m_condensate_fluxes = mf.RK4_fluxes(RK_dt, RK_times, SC_ratio, Xi_in_n,
+                T_wall_n, T_hfluid_n, m_condensed_n, RK_T_in, RK_flowrate_in, RK_p_ref, field_v, field_p, C_in_n,
                 field_Ci_n, field_T_n,
-                rho_cat_bulk, field_BET_cat, d_cat_part_v, cat_cp, cat_shape, d_tube_in, l_tube,
-                epsilon, N, pi_limit, nu_i, nu_j, adv_index, diff_index)
+                field_BET_cat)
             
             # --- Evolve in time using fluxes and dt
             field_Ci_n1 = field_Ci_n + dt*Ci_fluxes
@@ -724,12 +767,10 @@ if sim_type == 'dynamic':
             # Get velocity, pressure, and some other variables
             v_in_n, v_out_n, field_v, \
                 p_in_n, p_out_n, field_p, \
-                Q_in_n, Q_out_n, C_in_n, rho_in_n, rho_out_n = mf.get_IO_velocity_and_pressure(p_ref_n, p_set_pos, T_in_n, ni_in_n, Xi_in_n, epsilon, r_tube, l_tube, d_cat_part_v, cell_z_centers)
-    
+                Q_in_n, Q_out_n, C_in_n = mf.get_IO_velocity_and_pressure(p_ref_n, field_T_n, field_Ci_n, field_v, field_p, ni_in_n, T_in_n, Xi_in_n)
 
-            if v_in_n != v_in_prev: # If velocity changed
             # Calculate new radial diffusion coefficient
-                field_D_er = mf.radial_diffusion_coefficient(field_v, d_cat_part_v, d_tube_in)
+            # field_D_er = mf.radial_diffusion_coefficient(field_v, d_cat_part_v, d_tube_in)
         
             counter_save += 1
             if counter_save >= dyn_save_every:
@@ -737,7 +778,7 @@ if sim_type == 'dynamic':
                 MSR_rate, MD_rate, WGS_rate, CH3OH_rate, H2O_rate, H2_rate, CO2_rate, CO_rate = mf.get_rate_fields(field_Ci_n1, field_T_n1, field_p, field_BET_cat,
                                                                                                             pi_limit)
                 # Get mass flows at inlet and outlet
-                m_inlet, m_outlet = mf.get_mass_flow(v_in_n, v_out_n, r_tube, C_in_n, field_Ci_n1)
+                m_inlet, m_outlet = mf.get_mass_flow(ni_in_n, v_out_n, field_Ci_n1)
                 
                 # List of fields and values for .json file writing
                 values = dynamic_value_list()
@@ -757,7 +798,7 @@ if sim_type == 'dynamic':
                                                                                                     pi_limit)
         
         # Get mass flows at inlet and outlet
-        m_inlet, m_outlet = mf.get_mass_flow(v_in_n, v_out_n, r_tube, C_in_n, field_Ci_n1)
+        m_inlet, m_outlet = mf.get_mass_flow(ni_in_n, v_out_n, field_Ci_n1)
         
         # Write final .json
         values = dynamic_value_list()            
