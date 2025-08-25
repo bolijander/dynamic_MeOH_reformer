@@ -286,11 +286,8 @@ elif not cont_sim:
     # Aspect ratio - size ratio of reactor tube to catalyst particle 
     N = mf.aspect_ratio(d_tube_in, d_cat_part_v)
     
-    # Reactor (packed bed) porosity
-    epsilon = mf.porosity(d_tube_in, cat_dimensions, cat_shape)
-    
-    # Catalyst material and shipping densities - if one of them is unknown
-    rho_cat, rho_cat_bulk = mf.catalyst_densities(rho_cat, rho_cat_bulk, epsilon, known_cat_density)
+    # Catalyst material densitym shipping density, and porosity
+    rho_cat, rho_cat_bulk, epsilon = mf.catalyst_densities(rho_cat, rho_cat_bulk, known_cat_density, d_tube_in, cat_dimensions, cat_shape)
     
     # Catalyst material specific heat capacity
     cat_cp = mf.catalyst_cp(cat_composition)

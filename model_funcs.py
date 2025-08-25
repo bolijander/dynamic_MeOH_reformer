@@ -771,7 +771,7 @@ def porosity(d_ti, dimensions, shape='sphere'):
 
 
 
-def catalyst_densities(rho_cat, rho_cat_bulk, epsilon, known_cat_density):
+def catalyst_densities(rho_cat, rho_cat_bulk, known_cat_density, d_tube_in, cat_dimensions, cat_shape):
     """
     Calculate CATALYST MATERIAL DENSITY or CATALYST BULK (SHIPPING) DENSITY through porosity
 
@@ -781,10 +781,15 @@ def catalyst_densities(rho_cat, rho_cat_bulk, epsilon, known_cat_density):
         [kg m-3] Catalyst material density 
     rho_cat_bulk : 
         [kg m-3] Catalyst bulk (shipping) density
-    epsilon : 
-        [-] Reactor bed porosity
     known_cat_density : string
         ('density' / 'bulk density' / 'both') Selection of which density is known
+    d_ti :              
+        [m] Reactor tube inner diameter  
+    dimensions : float or list            
+        dimensions for catalyst particle - if sphere then its d, if cylinder then its [h,d]
+    shape : string      
+        [sphere / cylinder] Choice of catalyst particle shape
+    
 
     Returns
     -------
@@ -795,16 +800,22 @@ def catalyst_densities(rho_cat, rho_cat_bulk, epsilon, known_cat_density):
 
     """
     
+    
+    if not known_cat_density == 'both': # Only calculate porosity if we dont know both densities
+        # Reactor (packed bed) porosity
+        epsilon = porosity(d_tube_in, cat_dimensions, cat_shape)
+    
+    
     if known_cat_density == 'density': # if we know material density
         rho_cat_bulk = rho_cat * (1 - epsilon) # calculate bulk density through porosity
         
     elif known_cat_density == 'bulk density': # if we know bulk density
         rho_cat = rho_cat_bulk / (1 - epsilon) # calculate material density through porosity
         
-    else: # otherwise, assume we know both densities
-        pass
+    else: # otherwise, assume we know both densities and calculate porosity
+        epsilon = 1 - (rho_cat_bulk / rho_cat)
     
-    return rho_cat, rho_cat_bulk
+    return rho_cat, rho_cat_bulk, epsilon
 
 
 def catalyst_cp(cat_composition):
@@ -3930,7 +3941,6 @@ def read_and_set_T_wall_BC(input_json_fname, dyn_bc, z_cell_centers, l_tube):
             Q_rad_fgas = d_tube_out_h * np.pi * N_t_h * h_s * (T_fgas - T_wall) # [W m-1] Total heat transfered by convection to reactor
 
             hfluid_flux = (-Q_adv_fgas - Q_rad_fgas) / Cp_fgas / rho_fgas(T_fgas) / A_pe
-            
             
             return wall_flux, hfluid_flux, 0
         
